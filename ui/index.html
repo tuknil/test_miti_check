@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>mitigation-check · Runs</title>
+  <link rel="stylesheet" href="styles.css?v=5" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="sidebar-head">
+        <h2>Runs</h2>
+        <div class="head-actions">
+          <button id="new-btn" title="New run">＋ New</button>
+          <button id="refresh-btn" title="Refresh">↻</button>
+        </div>
+      </div>
+      <ul id="run-list" class="run-list">
+        <li class="run-empty">No runs yet.</li>
+      </ul>
+    </aside>
+
+    <main class="main">
+      <section class="panel" id="composer">
+        <h1>New mitigation-check run</h1>
+        <form id="run-form" novalidate>
+          <label class="field">
+            <span class="field-label">Request payload (JSON)</span>
+            <textarea id="payload" name="payload" spellcheck="false" rows="9"></textarea>
+          </label>
+          <label class="field">
+            <span class="field-label">API base URL</span>
+            <input id="api-base" value="http://localhost:8137" />
+          </label>
+          <button type="submit" id="submit-btn">Submit run · POST</button>
+        </form>
+        <div id="composer-status" class="response idle">
+          Submit to bring up the container, apply the WAF rule, and run the test.
+        </div>
+      </section>
+
+      <section class="panel" id="detail" hidden></section>
+    </main>
+  </div>
+
+  <script src="app.js?v=5"></script>
+</body>
+</html>
