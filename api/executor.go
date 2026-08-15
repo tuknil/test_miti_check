@@ -22,6 +22,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -106,26 +107,43 @@ func executeScenario(ctx context.Context, req SubmitMitigationCheckRequest, runI
 	out.Steps = append(out.Steps, "parsed candidate SecRule id="+waf.ruleID+" (deny→"+strconv.Itoa(waf.status)+")")
 
 	// 1. Bring up the substrate container.
-	port, err := freePort()
-	if err != nil {
-		return couldNotTest(out, "no free host port for substrate")
-	}
-	out.Substrate.HostPort = port
-
 	if err := dockerAvailable(ctx); err != nil {
 		return couldNotTest(out, "docker not available: "+err.Error())
 	}
 	out.Steps = append(out.Steps, "docker available")
 
-	cid, err := startContainer(ctx, sub.Image, port)
-	if err != nil {
-		return couldNotTest(out, "could not start substrate container: "+trimErr(err))
+	// Two connection modes:
+	//  - network mode (containerized): attach the substrate to a shared docker
+	//    network (MC_SUBSTRATE_NETWORK) and reach it by container name:8080.
+	//  - local mode: publish the substrate on 127.0.0.1:<free-port>.
+	network := os.Getenv("MC_SUBSTRATE_NETWORK")
+	var cid, base string
+	if network != "" {
+		name := runID // unique per submit → safe container name on the network
+		cid, err = startContainerNet(ctx, sub.Image, name, network)
+		if err != nil {
+			return couldNotTest(out, "could not start substrate container: "+trimErr(err))
+		}
+		base = "http://" + name + ":8080"
+		out.Substrate.HostPort = 8080
+		out.Steps = append(out.Steps, "started container "+shortID(cid)+" from "+sub.Image+" on network "+network+" as "+name+":8080")
+	} else {
+		var port int
+		port, err = freePort()
+		if err != nil {
+			return couldNotTest(out, "no free host port for substrate")
+		}
+		out.Substrate.HostPort = port
+		cid, err = startContainer(ctx, sub.Image, port)
+		if err != nil {
+			return couldNotTest(out, "could not start substrate container: "+trimErr(err))
+		}
+		base = fmt.Sprintf("http://127.0.0.1:%d", port)
+		out.Steps = append(out.Steps, "started container "+shortID(cid)+" from "+sub.Image+" on 127.0.0.1:"+strconv.Itoa(port))
 	}
 	out.Substrate.ContainerID = shortID(cid)
-	out.Steps = append(out.Steps, "started container "+shortID(cid)+" from "+sub.Image+" on 127.0.0.1:"+strconv.Itoa(port))
 	defer func() { _ = stopContainer(cid) }()
 
-	base := fmt.Sprintf("http://127.0.0.1:%d", port)
 	if err := waitReady(ctx, base, 90*time.Second); err != nil {
 		return couldNotTest(out, "substrate did not become ready: "+err.Error())
 	}
@@ -287,6 +305,21 @@ func startContainer(ctx context.Context, image string, hostPort int) (string, er
 	args := []string{"run", "-d", "--rm",
 		"-p", fmt.Sprintf("127.0.0.1:%d:8080", hostPort),
 		image}
+	cmd := exec.CommandContext(c, "docker", args...)
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("%s", strings.TrimSpace(errb.String()+" "+err.Error()))
+	}
+	return strings.TrimSpace(out.String()), nil
+}
+
+// startContainerNet runs the substrate on a shared docker network, reachable by
+// name (no host port publishing). Used when the API itself runs in a container.
+func startContainerNet(ctx context.Context, image, name, network string) (string, error) {
+	c, cancel := context.WithTimeout(ctx, 120*time.Second)
+	defer cancel()
+	args := []string{"run", "-d", "--rm", "--name", name, "--network", network, image}
 	cmd := exec.CommandContext(c, "docker", args...)
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb

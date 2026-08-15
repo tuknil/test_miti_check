@@ -67,7 +67,32 @@ survive API restarts. The directory is configurable via `MC_DATA_DIR`. The
 `RunStore` surface is storage-agnostic — a PostgreSQL adapter (LLD §11) can
 replace the file backend without touching the handlers.
 
-## Run it
+## Run it — Docker (recommended)
+
+Both services run as containers via Docker Compose:
+
+```bash
+docker compose up -d --build
+```
+
+- UI → http://localhost:8082
+- API → http://localhost:8137
+
+Then stop with `docker compose down` (keep `-v` off to preserve the ledger).
+
+**Requires the host Docker socket.** The API launches the validation-substrate
+container on the host daemon (`/var/run/docker.sock` is mounted) and attaches it
+to the shared `mitigation-net` network, reaching it by container name — so the
+containerized API can bring up substrates just like the local build.
+
+### Ledger durability
+
+The run ledger is stored on the named volume `ledger-data` (mounted at
+`/app/data`). It **survives `docker stop` and `docker rm`** of the API container —
+recreate the container and past runs reload automatically. Only
+`docker compose down -v` deletes the volume.
+
+## Run it — local (without Docker for the app itself)
 
 **API** (defaults to port 8090; override with `PORT`):
 
@@ -82,7 +107,8 @@ cd ui && python3 -m http.server 5501
 ```
 
 Open http://localhost:5501 and set the "API base URL" field to match the API
-port (e.g. `http://localhost:8137`).
+port (e.g. `http://localhost:8137`). In local mode the substrate is published on
+`127.0.0.1:<free-port>` instead of the shared network.
 
 ## Verify the API directly
 

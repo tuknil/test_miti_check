@@ -1,0 +1,44 @@
+# mitigation-check: UI + API as containers.
+#
+# The API launches the validation-substrate container on the host Docker daemon
+# (mounted docker.sock) and attaches it to the shared `mitigation-net` network,
+# reaching it by name. The run ledger is stored on the named volume `ledger-data`,
+# which survives `docker stop` and `docker rm` (only `docker compose down -v`
+# deletes it).
+
+services:
+  api:
+    build: ./api
+    image: mitigation-check-api
+    container_name: mitigation-api
+    environment:
+      PORT: "8137"
+      MC_DATA_DIR: /app/data/runs
+      MC_SUBSTRATE_NETWORK: mitigation-net
+    ports:
+      - "8137:8137"
+    volumes:
+      - ledger-data:/app/data                       # durable run ledger
+      - /var/run/docker.sock:/var/run/docker.sock    # launch substrate containers
+    networks:
+      - mitnet
+    restart: unless-stopped
+
+  ui:
+    build: ./ui
+    image: mitigation-check-ui
+    container_name: mitigation-ui
+    ports:
+      - "8082:80"
+    depends_on:
+      - api
+    networks:
+      - mitnet
+    restart: unless-stopped
+
+volumes:
+  ledger-data:
+
+networks:
+  mitnet:
+    name: mitigation-net
