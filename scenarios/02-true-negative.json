@@ -1,0 +1,38 @@
+{
+  "contract_id": "mitigation-check@1.0",
+  "candidate_artifact_id": "candidate:log4shell:waf-rule:strict",
+  "test_basis_id": "test-basis:benign:normal-api-version",
+  "check_profile_id": "mitigation-check-profile:waf-http:1",
+  "substrate_selector": "substrate:log4j-vulnerable-webserver:container",
+  "substrate": {
+    "kind": "container-image",
+    "image": "ghcr.io/christophetd/log4shell-vulnerable-app:latest",
+    "port": 8080,
+    "vulnerability_id": "CVE-2021-44228"
+  },
+  "candidate": {
+    "kind": "waf-rule",
+    "engine": "modsecurity",
+    "rule_id": "1005440",
+    "action": "deny",
+    "rule": "SecRule REQUEST_HEADERS|REQUEST_URI|ARGS \"@rx (?i)\\$\\{jndi:(?:ldaps?|rmi|dns|nis|iiop|corba|nds|https?):/[^}]*\\}\" \"id:1005440,phase:2,deny,status:403,t:none,t:urlDecodeUni,log,msg:'Log4Shell JNDI lookup (CVE-2021-44228)',tag:'CVE-2021-44228'\""
+  },
+  "test_basis": {
+    "kind": "http-request-benign",
+    "proof_basis": "mitigation-discriminator",
+    "request": {
+      "method": "GET",
+      "path": "/",
+      "headers": {
+        "X-Api-Version": "2.11.0",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9"
+      }
+    },
+    "expected": {
+      "classification": "true-negative",
+      "blocked": false,
+      "status_code": 200
+    }
+  }
+}

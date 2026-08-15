@@ -1,0 +1,37 @@
+{
+  "contract_id": "mitigation-check@1.0",
+  "candidate_artifact_id": "candidate:log4shell:waf-rule:overbroad",
+  "test_basis_id": "test-basis:benign:jndi-documentation",
+  "check_profile_id": "mitigation-check-profile:waf-http:1",
+  "substrate_selector": "substrate:log4j-vulnerable-webserver:container",
+  "substrate": {
+    "kind": "container-image",
+    "image": "ghcr.io/christophetd/log4shell-vulnerable-app:latest",
+    "port": 8080,
+    "vulnerability_id": "CVE-2021-44228"
+  },
+  "candidate": {
+    "kind": "waf-rule",
+    "engine": "modsecurity",
+    "rule_id": "1005450",
+    "action": "deny",
+    "rule": "SecRule REQUEST_URI|REQUEST_HEADERS|ARGS \"@rx (?i)jndi\" \"id:1005450,phase:2,deny,status:403,log,msg:'Over-broad: blocks any request mentioning jndi'\""
+  },
+  "test_basis": {
+    "kind": "http-request-benign",
+    "proof_basis": "mitigation-discriminator",
+    "request": {
+      "method": "GET",
+      "path": "/articles/mitigating-jndi-injection-in-java",
+      "headers": {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml"
+      }
+    },
+    "expected": {
+      "classification": "false-positive",
+      "blocked": false,
+      "status_code": 200
+    }
+  }
+}
