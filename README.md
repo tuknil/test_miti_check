@@ -77,6 +77,7 @@ docker compose up -d --build
 
 - UI → http://localhost:8082
 - API → http://localhost:8137
+- API docs (Swagger UI) → http://localhost:8137/docs · spec at http://localhost:8137/openapi.yaml
 
 Then stop with `docker compose down` (keep `-v` off to preserve the ledger).
 

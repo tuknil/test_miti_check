@@ -8,6 +8,7 @@ package main
 import (
 	"bytes"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,6 +23,9 @@ import (
 )
 
 const contractID = "mitigation-check@1.0"
+
+//go:embed openapi.yaml
+var openapiSpec []byte
 
 // maxBodyBytes bounds request payloads at the API edge (LLD §3.4, §13.7).
 const maxBodyBytes = 64 * 1024
@@ -113,6 +117,8 @@ func main() {
 	mux.HandleFunc("/v1/mitigation-check-runs", withCORS(handleRunsCollection))
 	mux.HandleFunc("/v1/mitigation-check-runs/", withCORS(handleRunItem))
 	mux.HandleFunc("/healthz", withCORS(handleHealth))
+	mux.HandleFunc("/openapi.yaml", withCORS(handleOpenAPI))
+	mux.HandleFunc("/docs", withCORS(handleDocs))
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -124,6 +130,41 @@ func main() {
 		log.Fatal(err)
 	}
 }
+
+// handleOpenAPI serves the embedded OpenAPI 3 spec.
+func handleOpenAPI(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/yaml")
+	_, _ = w.Write(openapiSpec)
+}
+
+// handleDocs serves a Swagger UI page pointed at the embedded spec. The Swagger
+// UI assets load from a CDN, so viewing /docs needs internet access.
+func handleDocs(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write([]byte(swaggerHTML))
+}
+
+const swaggerHTML = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>mitigation-check API — Swagger</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css"/>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script>
+    window.ui = SwaggerUIBundle({
+      url: 'openapi.yaml',
+      dom_id: '#swagger-ui',
+      deepLinking: true,
+      tryItOutEnabled: true
+    });
+  </script>
+</body>
+</html>`
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {

@@ -1,0 +1,362 @@
+openapi: 3.0.3
+info:
+  title: mitigation-check API
+  version: "1.0"
+  description: >
+    Fast block/pass proof capability for one candidate mitigation against one
+    test basis in one bounded validation substrate (contract `mitigation-check@1.0`).
+    On submit the API brings up the substrate container, applies the candidate
+    WAF rule, runs the supplied test, resolves a terminal state, and records the
+    run (immutable request + response) in a durable ledger.
+servers:
+  - url: http://localhost:8137
+    description: Local / Docker Compose
+
+paths:
+  /v1/mitigation-check-runs:
+    post:
+      summary: Submit and execute a mitigation-check run
+      operationId: submitRun
+      description: >
+        Validates the request against `SubmitMitigationCheckRequest@1`, then
+        executes it: start the substrate container, apply the candidate rule,
+        run the test, and resolve a terminal state.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitMitigationCheckRequest"
+            examples:
+              truePositive:
+                summary: Attack correctly blocked (TP)
+                value:
+                  contract_id: mitigation-check@1.0
+                  candidate_artifact_id: candidate:log4shell:waf-rule:strict
+                  test_basis_id: test-basis:log4shell:attack:jndi-ldap
+                  check_profile_id: mitigation-check-profile:waf-http:1
+                  substrate_selector: substrate:log4j-vulnerable-webserver:container
+                  substrate:
+                    kind: container-image
+                    image: ghcr.io/christophetd/log4shell-vulnerable-app:latest
+                    port: 8080
+                    vulnerability_id: CVE-2021-44228
+                  candidate:
+                    kind: waf-rule
+                    engine: modsecurity
+                    rule_id: "1005440"
+                    action: deny
+                    rule: >-
+                      SecRule REQUEST_HEADERS|REQUEST_URI|ARGS "@rx (?i)\$\{jndi:(?:ldaps?|rmi|dns):/[^}]*\}" "id:1005440,phase:2,deny,status:403"
+                  test_basis:
+                    kind: http-request-attack
+                    proof_basis: verified-vuln-artifact
+                    request:
+                      method: GET
+                      path: /
+                      headers:
+                        X-Api-Version: "${jndi:ldap://127.0.0.1:1389/a}"
+                    expected:
+                      classification: true-positive
+                      blocked: true
+                      status_code: 403
+      responses:
+        "200":
+          description: Run executed; terminal state resolved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunOutcome"
+        "400":
+          description: Request does not satisfy the contract.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    get:
+      summary: List runs (newest first)
+      operationId: listRuns
+      responses:
+        "200":
+          description: Run summaries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RunSummary"
+
+  /v1/mitigation-check-runs/{run_id}:
+    get:
+      summary: Get one run (immutable request + response)
+      operationId: getRun
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: mc-run-a2366a64394de5472eb39642
+      responses:
+        "200":
+          description: The run record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunRecord"
+        "404":
+          description: Run not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /healthz:
+    get:
+      summary: Liveness probe
+      operationId: health
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+components:
+  schemas:
+    SubmitMitigationCheckRequest:
+      type: object
+      additionalProperties: false
+      required: [contract_id, candidate_artifact_id, test_basis_id, check_profile_id]
+      properties:
+        contract_id:
+          type: string
+          enum: ["mitigation-check@1.0"]
+        candidate_artifact_id:
+          type: string
+          minLength: 1
+          description: Immutable candidate mitigation reference.
+        test_basis_id:
+          type: string
+          minLength: 1
+          description: Attack / discriminator sample reference.
+        check_profile_id:
+          type: string
+          minLength: 1
+          description: Signed check profile reference.
+        substrate_selector:
+          type: string
+          description: Logical bounded, non-production substrate (optional).
+        substrate:
+          $ref: "#/components/schemas/SubstrateSpec"
+        candidate:
+          $ref: "#/components/schemas/CandidateSpec"
+        test_basis:
+          $ref: "#/components/schemas/TestBasisSpec"
+
+    SubstrateSpec:
+      type: object
+      description: Inline validation substrate — a bounded, non-production container image.
+      required: [kind, image]
+      properties:
+        kind:
+          type: string
+          example: container-image
+        image:
+          type: string
+          example: ghcr.io/christophetd/log4shell-vulnerable-app:latest
+        digest:
+          type: string
+        port:
+          type: integer
+          example: 8080
+        vulnerability_id:
+          type: string
+          example: CVE-2021-44228
+
+    CandidateSpec:
+      type: object
+      description: Inline candidate mitigation (here, a ModSecurity WAF rule).
+      required: [kind, rule]
+      properties:
+        kind:
+          type: string
+          example: waf-rule
+        engine:
+          type: string
+          example: modsecurity
+        rule_id:
+          type: string
+          example: "1005440"
+        rule:
+          type: string
+          description: The actual SecRule; its @rx pattern + id/status are applied.
+        action:
+          type: string
+          example: deny
+
+    TestBasisSpec:
+      type: object
+      required: [kind, proof_basis, expected]
+      properties:
+        kind:
+          type: string
+          example: http-request-attack
+        proof_basis:
+          type: string
+          enum: [verified-vuln-artifact, mitigation-discriminator]
+        request:
+          $ref: "#/components/schemas/TestRequest"
+        expected:
+          $ref: "#/components/schemas/TestExpected"
+
+    TestRequest:
+      type: object
+      properties:
+        method:
+          type: string
+          example: GET
+        path:
+          type: string
+          example: /
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        body:
+          type: string
+
+    TestExpected:
+      type: object
+      properties:
+        classification:
+          type: string
+          example: true-positive
+        blocked:
+          type: boolean
+        status_code:
+          type: integer
+          example: 403
+
+    RunOutcome:
+      type: object
+      properties:
+        run_id:
+          type: string
+        result_id:
+          type: string
+        terminal_state:
+          type: string
+          enum: [blocked, not-blocked, could-not-test, malfunction]
+        match:
+          type: boolean
+          description: Whether actual.blocked equals expected.blocked.
+        expected:
+          $ref: "#/components/schemas/Outcome"
+        actual:
+          $ref: "#/components/schemas/ActualOutcome"
+        substrate:
+          $ref: "#/components/schemas/SubstrateInfo"
+        steps:
+          type: array
+          items:
+            type: string
+        prose_summary:
+          type: string
+        limitations:
+          type: array
+          items:
+            type: string
+
+    Outcome:
+      type: object
+      properties:
+        classification:
+          type: string
+        blocked:
+          type: boolean
+        status_code:
+          type: integer
+
+    ActualOutcome:
+      type: object
+      properties:
+        blocked:
+          type: boolean
+        status_code:
+          type: integer
+        reached_app:
+          type: boolean
+        matched_rule_id:
+          type: string
+        detail:
+          type: string
+
+    SubstrateInfo:
+      type: object
+      properties:
+        image:
+          type: string
+        container_id:
+          type: string
+        host_port:
+          type: integer
+        ready:
+          type: boolean
+
+    RunSummary:
+      type: object
+      properties:
+        run_id:
+          type: string
+        result_id:
+          type: string
+        terminal_state:
+          type: string
+        match:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        summary:
+          type: string
+
+    RunRecord:
+      type: object
+      properties:
+        run_id:
+          type: string
+        result_id:
+          type: string
+        terminal_state:
+          type: string
+        match:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        request:
+          $ref: "#/components/schemas/SubmitMitigationCheckRequest"
+        response:
+          $ref: "#/components/schemas/RunOutcome"
+
+    ErrorEnvelope:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            category:
+              type: string
+              example: invalid-input
+            message:
+              type: string
+            fields:
+              type: array
+              items:
+                type: string
