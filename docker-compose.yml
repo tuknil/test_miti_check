@@ -13,12 +13,12 @@ services:
     container_name: mitigation-api
     environment:
       PORT: "8137"
-      MC_DATA_DIR: /app/data/runs
+      MC_DATA_DIR: /app/data
       MC_SUBSTRATE_NETWORK: mitigation-net
     ports:
       - "8137:8137"
     volumes:
-      - ledger-data:/app/data                       # durable run ledger
+      - pgledger:/app/data                           # embedded-postgres cluster (durable)
       - /var/run/docker.sock:/var/run/docker.sock    # launch substrate containers
     networks:
       - mitnet
@@ -37,7 +37,7 @@ services:
     restart: unless-stopped
 
 volumes:
-  ledger-data:
+  pgledger:
 
 networks:
   mitnet:

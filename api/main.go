@@ -16,7 +16,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"crypto/rand"
@@ -105,7 +107,7 @@ var store *RunStore
 func main() {
 	dataDir := os.Getenv("MC_DATA_DIR")
 	if dataDir == "" {
-		dataDir = "data/runs"
+		dataDir = "data"
 	}
 	s, err := NewRunStore(dataDir)
 	if err != nil {
@@ -124,9 +126,24 @@ func main() {
 	if port == "" {
 		port = "8090"
 	}
-	addr := ":" + port
-	log.Printf("mitigation-check API listening on %s", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	srv := &http.Server{Addr: ":" + port, Handler: mux}
+
+	// On SIGINT/SIGTERM (docker stop) stop accepting requests, then fall through
+	// so main can shut the embedded Postgres down cleanly before exiting.
+	go func() {
+		sig := make(chan os.Signal, 1)
+		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+		<-sig
+		log.Print("shutting down…")
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
+	}()
+
+	log.Printf("mitigation-check API listening on %s", srv.Addr)
+	err = srv.ListenAndServe()
+	store.Close() // synchronous: guarantees postgres stops cleanly before exit
+	if err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
 }
