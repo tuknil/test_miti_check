@@ -61,23 +61,18 @@ Every submitted run is recorded in an in-memory ledger (LLD §11.1), keeping the
 The UI shows a left **Runs** panel; clicking a run opens its immutable request
 (marked immutable) and rendered result on the right.
 
-**Persistence — embedded PostgreSQL.** The ledger is stored in a PostgreSQL
-instance the API manages in-process (`fergusstrange/embedded-postgres`). The
-immutable request and the executed response are `JSONB` columns of
-`mitigation_check_run`. The Postgres data cluster (and cached binaries) live
-under `MC_DATA_DIR` — a mounted volume in Docker — so runs are **durable across
-`docker stop` and `docker rm`**: recreate the container and Postgres reuses the
-existing cluster.
+**Persistence — PostgreSQL container.** The ledger is stored in a `db` Postgres
+service (`postgres:16-alpine`) defined in `docker-compose.yml`. The immutable
+request and the executed response are `JSONB` columns of `mitigation_check_run`.
+The API connects via `DATABASE_URL` (default `postgres://mc:mc@db:5432/mitigation`)
+and waits for the db healthcheck before serving.
 
-Notes on the container:
+The db data lives on the named volume `pgdata` (`/var/lib/postgresql/data`), so
+runs are **durable across `docker stop` and `docker rm` of the db container** —
+recreate it and the data is intact; the API's connection pool reconnects
+automatically. Only `docker compose down -v` deletes the volume.
 
-- The runtime image is Debian (not Alpine) because the embedded Postgres
-  binaries are glibc-linked.
-- Postgres refuses to run as root, so the container starts as root only long
-  enough to make the mounted docker socket reachable, then drops to a non-root
-  `app` user (see `api/entrypoint.sh`) under which both the API and Postgres run.
-- On first start the Postgres binaries are downloaded once and cached on the
-  volume, so container recreation does not re-download them.
+For a local (non-Docker) API run, point `DATABASE_URL` at any reachable Postgres.
 
 ## Run it — Docker (recommended)
 

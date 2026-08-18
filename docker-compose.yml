@@ -1,25 +1,45 @@
-# mitigation-check: UI + API as containers.
+# mitigation-check: UI + API + Postgres as containers.
 #
 # The API launches the validation-substrate container on the host Docker daemon
 # (mounted docker.sock) and attaches it to the shared `mitigation-net` network,
-# reaching it by name. The run ledger is stored on the named volume `ledger-data`,
-# which survives `docker stop` and `docker rm` (only `docker compose down -v`
-# deletes it).
+# reaching it by name. The run ledger lives in the `db` Postgres container; its
+# data is on the named volume `pgdata`, which survives `docker stop` and
+# `docker rm` of the db container (only `docker compose down -v` deletes it).
 
 services:
+  db:
+    image: postgres:16-alpine
+    container_name: mitigation-db
+    environment:
+      POSTGRES_USER: mc
+      POSTGRES_PASSWORD: mc
+      POSTGRES_DB: mitigation
+    volumes:
+      - pgdata:/var/lib/postgresql/data      # durable ledger data
+    networks:
+      - mitnet
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mc -d mitigation"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
   api:
     build: ./api
     image: mitigation-check-api
     container_name: mitigation-api
     environment:
       PORT: "8137"
-      MC_DATA_DIR: /app/data
+      DATABASE_URL: postgres://mc:mc@db:5432/mitigation?sslmode=disable
       MC_SUBSTRATE_NETWORK: mitigation-net
     ports:
       - "8137:8137"
     volumes:
-      - pgledger:/app/data                           # embedded-postgres cluster (durable)
       - /var/run/docker.sock:/var/run/docker.sock    # launch substrate containers
+    depends_on:
+      db:
+        condition: service_healthy
     networks:
       - mitnet
     restart: unless-stopped
@@ -37,7 +57,7 @@ services:
     restart: unless-stopped
 
 volumes:
-  pgledger:
+  pgdata:
 
 networks:
   mitnet:

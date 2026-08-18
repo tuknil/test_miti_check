@@ -105,11 +105,11 @@ type APIError struct {
 var store *RunStore
 
 func main() {
-	dataDir := os.Getenv("MC_DATA_DIR")
-	if dataDir == "" {
-		dataDir = "data"
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		dsn = "postgres://mc:mc@localhost:5432/mitigation?sslmode=disable"
 	}
-	s, err := NewRunStore(dataDir)
+	s, err := NewRunStore(dsn)
 	if err != nil {
 		log.Fatalf("could not open run ledger: %v", err)
 	}
