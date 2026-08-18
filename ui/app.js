@@ -57,6 +57,7 @@ let execMode = "local";
 const EXEC_NOTES = {
   local: "Runs the substrate on the host Docker daemon.",
   aci: "Runs the substrate as an Azure Container Instance (for ACA-hosted API; needs Azure config).",
+  github: "Dispatches a GitHub Actions workflow that runs the scenario, then stores the retrieved result (needs GitHub config).",
 };
 
 execToggle.addEventListener("click", (e) => {

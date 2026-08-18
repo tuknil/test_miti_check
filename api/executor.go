@@ -77,8 +77,9 @@ const (
 
 // Execution modes select which substrate adapter brings up the target.
 const (
-	execLocal = "local" // docker on the host daemon (docker.sock)
-	execACI   = "aci"   // Azure Container Instances (ACA-compatible; no docker.sock)
+	execLocal  = "local"  // docker on the host daemon (docker.sock)
+	execACI    = "aci"    // Azure Container Instances (ACA-compatible; no docker.sock)
+	execGitHub = "github" // dispatch a GitHub Actions workflow that runs the scenario
 )
 
 // substrate is a brought-up validation target ready to receive test traffic.
@@ -116,6 +117,20 @@ func executeScenario(ctx context.Context, req SubmitMitigationCheckRequest, runI
 	}
 	out.Substrate.Image = sub.Image
 
+	mode := req.ExecutionMode
+	if mode == "" {
+		mode = execLocal
+	}
+	out.Substrate.Runner = mode
+	out.Steps = append(out.Steps, "execution mode: "+mode)
+
+	// GitHub mode delegates the entire scenario to a GitHub Actions runner, which
+	// runs this same executor (local mode) and returns the result — so bring-up,
+	// WAF, and verdict all happen remotely.
+	if mode == execGitHub {
+		return runViaGitHub(ctx, req, out)
+	}
+
 	// Compile the candidate rule up front; a rule we cannot parse means we cannot
 	// faithfully apply the candidate, so we cannot test.
 	waf, err := compileRule(cand)
@@ -126,13 +141,6 @@ func executeScenario(ctx context.Context, req SubmitMitigationCheckRequest, runI
 
 	// 1. Bring up the substrate via the selected adapter. The rest of the flow
 	// (apply WAF, run test, verdict) is identical regardless of where it runs.
-	mode := req.ExecutionMode
-	if mode == "" {
-		mode = execLocal
-	}
-	out.Substrate.Runner = mode
-	out.Steps = append(out.Steps, "execution mode: "+mode)
-
 	var runner substrateRunner
 	switch mode {
 	case execLocal:

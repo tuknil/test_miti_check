@@ -1,0 +1,43 @@
+name: mitigation-check
+# The run's display name carries the run_id so the API can locate this run.
+run-name: mc-${{ inputs.run_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Correlation id from the API
+        required: true
+        type: string
+      scenario:
+        description: base64-encoded SubmitMitigationCheckRequest JSON
+        required: true
+        type: string
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: api/go.mod
+
+      - name: Decode scenario
+        run: echo "${{ inputs.scenario }}" | base64 -d > scenario.json
+
+      - name: Run scenario
+        working-directory: api
+        # Reuses the exact executor via the run-scenario CLI; Docker is preinstalled
+        # on ubuntu-latest, so the substrate container runs on the runner.
+        run: go run . run-scenario ../scenario.json > ../result.json
+
+      - name: Show result
+        run: cat result.json
+
+      - name: Upload result
+        uses: actions/upload-artifact@v4
+        with:
+          name: mitigation-check-result
+          path: result.json

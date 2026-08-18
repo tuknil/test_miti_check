@@ -108,6 +108,13 @@ type APIError struct {
 var store *RunStore
 
 func main() {
+	// CLI mode used by the GitHub Actions workflow: run one scenario locally
+	// (docker on the runner) and print the RunOutcome JSON to stdout. No DB.
+	if len(os.Args) > 2 && os.Args[1] == "run-scenario" {
+		runScenarioCLI(os.Args[2])
+		return
+	}
+
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
 		dsn = "postgres://mc:mc@localhost:5432/mitigation?sslmode=disable"
@@ -152,6 +159,26 @@ func main() {
 }
 
 // handleOpenAPI serves the embedded OpenAPI 3 spec.
+// runScenarioCLI executes one scenario file and prints the RunOutcome JSON to
+// stdout. Used by the GitHub Actions workflow; keeps stdout JSON-only.
+func runScenarioCLI(path string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		log.Fatalf("read scenario: %v", err)
+	}
+	var req SubmitMitigationCheckRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		log.Fatalf("parse scenario: %v", err)
+	}
+	req.ExecutionMode = execLocal // on the runner, use docker
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	out := executeScenario(ctx, req, "mc-run-"+newID(), "mitigation-check-result:"+newID())
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(out)
+}
+
 func handleOpenAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/yaml")
 	_, _ = w.Write(openapiSpec)
@@ -251,7 +278,13 @@ func handleSubmitRun(w http.ResponseWriter, r *http.Request) {
 	runID := "mc-run-" + newID()
 	resultID := "mitigation-check-result:" + newID()
 
-	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
+	// GitHub runs dispatch a remote workflow (checkout + build + docker pull +
+	// run), which takes longer than a local container bring-up.
+	budget := 3 * time.Minute
+	if req.ExecutionMode == execGitHub {
+		budget = 12 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), budget)
 	defer cancel()
 
 	outcome := executeScenario(ctx, req, runID, resultID)
@@ -328,7 +361,7 @@ func validate(req SubmitMitigationCheckRequest) []string {
 	// substrate_selector is optional (LLD §10.1) — no constraint.
 
 	// execution_mode is optional; when set it must be a known adapter.
-	if m := req.ExecutionMode; m != "" && m != execLocal && m != execACI {
+	if m := req.ExecutionMode; m != "" && m != execLocal && m != execACI && m != execGitHub {
 		bad = append(bad, "execution_mode")
 	}
 

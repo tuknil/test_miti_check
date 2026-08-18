@@ -33,6 +33,16 @@ services:
       PORT: "8137"
       DATABASE_URL: postgres://mc:mc@db:5432/mitigation?sslmode=disable
       MC_SUBSTRATE_NETWORK: mitigation-net
+      # GitHub Actions execution mode (optional). Set in a local .env file.
+      GITHUB_REPO: ${GITHUB_REPO:-}
+      GITHUB_USERNAME: ${GITHUB_USERNAME:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GITHUB_WORKFLOW: ${GITHUB_WORKFLOW:-mitigation-check.yml}
+      GITHUB_REF: ${GITHUB_REF:-main}
+      # Azure ACI execution mode (optional).
+      AZURE_SUBSCRIPTION_ID: ${AZURE_SUBSCRIPTION_ID:-}
+      MC_ACI_RESOURCE_GROUP: ${MC_ACI_RESOURCE_GROUP:-}
+      MC_ACI_REGION: ${MC_ACI_REGION:-}
     ports:
       - "8137:8137"
     volumes:

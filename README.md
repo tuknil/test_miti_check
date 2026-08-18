@@ -73,6 +73,26 @@ bring-up/teardown differs — the WAF, test, and verdict are identical.
   `aci` run returns `could-not-test` with that reason rather than failing — so
   the mode is selectable everywhere; real execution needs Azure.
 
+- **`github`** — runs the scenario on a **GitHub Actions** runner. On submit the
+  API dispatches a `workflow_dispatch` in the configured repo (passing the run id
+  + the scenario as inputs), waits for the run to complete, downloads the result
+  artifact, and stores it — so the ledger row is identical to a local run. The
+  workflow (`.github/workflows/mitigation-check.yml`) runs **this same executor**
+  via the `run-scenario` CLI, so the logic is shared, not reimplemented. Config
+  (via docker compose `.env`):
+
+  ```
+  GITHUB_REPO=owner/repo        # repo that holds the workflow (on its default branch)
+  GITHUB_USERNAME=<user>        # informational
+  GITHUB_TOKEN=<PAT>            # actions:write on that repo
+  GITHUB_WORKFLOW=mitigation-check.yml   # optional (default)
+  GITHUB_REF=main                        # optional (default)
+  ```
+
+  The workflow must exist on the repo's **default branch** for the dispatch API
+  to find it. When GitHub isn't configured a `github` run returns
+  `could-not-test`.
+
 ## Step 3 — Run ledger
 
 Every submitted run is recorded in an in-memory ledger (LLD §11.1), keeping the
