@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/containerinstance/armcontainerinstance/v2"
@@ -30,18 +31,52 @@ import (
 const aciSubstratePort int32 = 8080
 
 // bringUpACISubstrate creates a per-run ACI container group for the substrate.
+func aciConfig() (subID, rg, region string, ok bool) {
+	subID = os.Getenv("AZURE_SUBSCRIPTION_ID")
+	rg = os.Getenv("MC_ACI_RESOURCE_GROUP")
+	region = os.Getenv("MC_ACI_REGION")
+	ok = subID != "" && rg != "" && region != ""
+	return
+}
+
+// bringUpACISubstrate (mode "aci") authenticates with DefaultAzureCredential —
+// managed identity on Azure, or env/az-cli locally.
 func bringUpACISubstrate(ctx context.Context, out *RunOutcome, sub SubstrateSpec, runID string) (*substrate, string) {
-	subID := os.Getenv("AZURE_SUBSCRIPTION_ID")
-	rg := os.Getenv("MC_ACI_RESOURCE_GROUP")
-	region := os.Getenv("MC_ACI_REGION")
-	if subID == "" || rg == "" || region == "" {
+	subID, rg, region, ok := aciConfig()
+	if !ok {
 		return nil, "azure ACI not configured (set AZURE_SUBSCRIPTION_ID, MC_ACI_RESOURCE_GROUP, MC_ACI_REGION)"
 	}
-
 	cred, err := azidentity.NewDefaultAzureCredential(nil)
 	if err != nil {
 		return nil, "azure credential unavailable: " + err.Error()
 	}
+	return bringUpACIWith(ctx, out, sub, runID, cred, subID, rg, region)
+}
+
+// bringUpACISPSubstrate (mode "aci-sp") authenticates with an explicit service
+// principal (AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_CLIENT_SECRET) — portable
+// to a laptop or ACA via env vars, no managed identity required.
+func bringUpACISPSubstrate(ctx context.Context, out *RunOutcome, sub SubstrateSpec, runID string) (*substrate, string) {
+	subID, rg, region, ok := aciConfig()
+	if !ok {
+		return nil, "azure ACI not configured (set AZURE_SUBSCRIPTION_ID, MC_ACI_RESOURCE_GROUP, MC_ACI_REGION)"
+	}
+	tenant := os.Getenv("AZURE_TENANT_ID")
+	clientID := os.Getenv("AZURE_CLIENT_ID")
+	secret := os.Getenv("AZURE_CLIENT_SECRET")
+	if tenant == "" || clientID == "" || secret == "" {
+		return nil, "azure service principal not configured (set AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET)"
+	}
+	cred, err := azidentity.NewClientSecretCredential(tenant, clientID, secret, nil)
+	if err != nil {
+		return nil, "azure service principal credential error: " + err.Error()
+	}
+	return bringUpACIWith(ctx, out, sub, runID, cred, subID, rg, region)
+}
+
+// bringUpACIWith creates the per-run ACI container group using the given
+// credential. Shared by the managed-identity and service-principal modes.
+func bringUpACIWith(ctx context.Context, out *RunOutcome, sub SubstrateSpec, runID string, cred azcore.TokenCredential, subID, rg, region string) (*substrate, string) {
 	factory, err := armcontainerinstance.NewClientFactory(subID, cred, nil)
 	if err != nil {
 		return nil, "azure client init failed: " + err.Error()

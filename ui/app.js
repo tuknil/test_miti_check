@@ -56,7 +56,8 @@ let execMode = "local";
 
 const EXEC_NOTES = {
   local: "Runs the substrate on the host Docker daemon.",
-  aci: "Runs the substrate as an Azure Container Instance (for ACA-hosted API; needs Azure config).",
+  aci: "Runs the substrate as an Azure Container Instance via DefaultAzureCredential (managed identity on ACA; needs Azure config).",
+  "aci-sp": "Azure Container Instance authenticated with a service principal (AZURE_TENANT_ID/CLIENT_ID/CLIENT_SECRET) — works from a laptop or ACA.",
   github: "Dispatches a GitHub Actions workflow that runs the scenario, then stores the retrieved result (needs GitHub config).",
 };
 

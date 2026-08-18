@@ -34,8 +34,8 @@ services:
       DATABASE_URL: postgres://mc:mc@db:5432/mitigation?sslmode=disable
       MC_SUBSTRATE_NETWORK: mitigation-net
       # GitHub Actions execution mode (optional). Set in a local .env file.
-      GITHUB_REPO: ${GITHUB_REPO:-}
-      GITHUB_USERNAME: ${GITHUB_USERNAME:-}
+      GITHUB_REPO: tuknil/test_miti_check
+      GITHUB_USERNAME: tuknil
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       GITHUB_WORKFLOW: ${GITHUB_WORKFLOW:-mitigation-check.yml}
       GITHUB_REF: ${GITHUB_REF:-main}
@@ -43,6 +43,10 @@ services:
       AZURE_SUBSCRIPTION_ID: ${AZURE_SUBSCRIPTION_ID:-}
       MC_ACI_RESOURCE_GROUP: ${MC_ACI_RESOURCE_GROUP:-}
       MC_ACI_REGION: ${MC_ACI_REGION:-}
+      # Service-principal auth for the "aci-sp" mode (works from a laptop or ACA).
+      AZURE_TENANT_ID: ${AZURE_TENANT_ID:-}
+      AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:-}
+      AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET:-}
     ports:
       - "8137:8137"
     volumes:

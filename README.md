@@ -73,6 +73,18 @@ bring-up/teardown differs — the WAF, test, and verdict are identical.
   `aci` run returns `could-not-test` with that reason rather than failing — so
   the mode is selectable everywhere; real execution needs Azure.
 
+- **`aci-sp`** — same ACI substrate, but authenticated with an explicit **service
+  principal** instead of a managed identity. Portable: works from a **laptop** or
+  on **ACA** with the same env vars. In addition to the three `AZURE_*`/`MC_ACI_*`
+  values above, set:
+
+  ```
+  AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET
+  ```
+
+  (The `aci` mode also accepts these via `DefaultAzureCredential`; `aci-sp` just
+  makes the service-principal path explicit and required.)
+
 - **`github`** — runs the scenario on a **GitHub Actions** runner. On submit the
   API dispatches a `workflow_dispatch` in the configured repo (passing the run id
   + the scenario as inputs), waits for the run to complete, downloads the result

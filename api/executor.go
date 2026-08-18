@@ -78,7 +78,8 @@ const (
 // Execution modes select which substrate adapter brings up the target.
 const (
 	execLocal  = "local"  // docker on the host daemon (docker.sock)
-	execACI    = "aci"    // Azure Container Instances (ACA-compatible; no docker.sock)
+	execACI    = "aci"    // Azure Container Instances via DefaultAzureCredential
+	execACISP  = "aci-sp" // Azure Container Instances via a service principal (env)
 	execGitHub = "github" // dispatch a GitHub Actions workflow that runs the scenario
 )
 
@@ -147,6 +148,8 @@ func executeScenario(ctx context.Context, req SubmitMitigationCheckRequest, runI
 		runner = bringUpLocalSubstrate
 	case execACI:
 		runner = bringUpACISubstrate
+	case execACISP:
+		runner = bringUpACISPSubstrate
 	default:
 		return couldNotTest(out, "unknown execution_mode: "+mode+" (use 'local' or 'aci')")
 	}

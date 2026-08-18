@@ -154,11 +154,12 @@ components:
           description: Logical bounded, non-production substrate (optional).
         execution_mode:
           type: string
-          enum: [local, aci, github]
+          enum: [local, aci, aci-sp, github]
           default: local
           description: >
             Substrate adapter. "local" runs the target on the host Docker daemon;
-            "aci" runs it as an Azure Container Instance (ACA-compatible);
+            "aci" runs it as an Azure Container Instance via DefaultAzureCredential;
+            "aci-sp" is ACI authenticated with a service principal (env vars);
             "github" dispatches a GitHub Actions workflow that runs the scenario
             and returns the result.
         substrate:
@@ -313,7 +314,7 @@ components:
           type: string
         runner:
           type: string
-          enum: [local, aci, github]
+          enum: [local, aci, aci-sp, github]
         container_id:
           type: string
         host_port:
