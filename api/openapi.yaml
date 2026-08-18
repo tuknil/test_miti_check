@@ -152,6 +152,13 @@ components:
         substrate_selector:
           type: string
           description: Logical bounded, non-production substrate (optional).
+        execution_mode:
+          type: string
+          enum: [local, aci]
+          default: local
+          description: >
+            Substrate adapter. "local" runs the target on the host Docker daemon;
+            "aci" runs it as an Azure Container Instance (ACA-compatible).
         substrate:
           $ref: "#/components/schemas/SubstrateSpec"
         candidate:
@@ -302,10 +309,16 @@ components:
       properties:
         image:
           type: string
+        runner:
+          type: string
+          enum: [local, aci]
         container_id:
           type: string
         host_port:
           type: integer
+        fqdn:
+          type: string
+          description: ACI public FQDN (aci runner only).
         ready:
           type: boolean
 

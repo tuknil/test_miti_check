@@ -48,8 +48,26 @@ const statusEl = document.getElementById("composer-status");
 const runListEl = document.getElementById("run-list");
 const detailEl = document.getElementById("detail");
 const composerEl = document.getElementById("composer");
+const execToggle = document.getElementById("exec-toggle");
+const execNote = document.getElementById("exec-note");
 
 let selectedRunId = null;
+let execMode = "local";
+
+const EXEC_NOTES = {
+  local: "Runs the substrate on the host Docker daemon.",
+  aci: "Runs the substrate as an Azure Container Instance (for ACA-hosted API; needs Azure config).",
+};
+
+execToggle.addEventListener("click", (e) => {
+  const btn = e.target.closest(".toggle-opt");
+  if (!btn) return;
+  execMode = btn.dataset.mode;
+  execToggle.querySelectorAll(".toggle-opt").forEach((b) =>
+    b.classList.toggle("active", b === btn)
+  );
+  execNote.textContent = EXEC_NOTES[execMode] || "";
+});
 
 // Landing view: only the submit composer is shown.
 function showLanding() {
@@ -196,7 +214,9 @@ function outcomeHTML(o) {
       </table>
       <p class="detail-line">${esc(act.detail || "")}</p>
       <div class="substrate">substrate: ${esc(sub.image || "?")}${
-        sub.container_id ? " · container " + esc(sub.container_id) : ""
+        sub.runner ? " · runner " + esc(sub.runner) : ""
+      }${sub.container_id ? " · " + esc(sub.container_id) : ""}${
+        sub.fqdn ? " · " + esc(sub.fqdn) : ""
       }${sub.host_port ? " · :" + esc(sub.host_port) : ""} · ready=${!!sub.ready}</div>
       <details><summary>execution steps</summary><ol>${steps}</ol></details>
     </div>`;
@@ -213,6 +233,8 @@ form.addEventListener("submit", async (e) => {
     setStatus("err", "Payload is not valid JSON: " + err.message);
     return;
   }
+  // The toggle is authoritative for where the substrate runs.
+  payload.execution_mode = execMode;
 
   const url = apiBase() + "/v1/mitigation-check-runs";
   submitBtn.disabled = true;

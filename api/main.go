@@ -45,6 +45,9 @@ type SubmitMitigationCheckRequest struct {
 	Substrate           json.RawMessage `json:"substrate,omitempty"`
 	Candidate           json.RawMessage `json:"candidate,omitempty"`
 	TestBasis           json.RawMessage `json:"test_basis,omitempty"`
+	// ExecutionMode selects the substrate adapter: "local" (docker, default) or
+	// "aci" (Azure Container Instances, for ACA-hosted deployments).
+	ExecutionMode string `json:"execution_mode,omitempty"`
 }
 
 // SubstrateSpec is the inline validation substrate — a bounded, non-production
@@ -323,6 +326,11 @@ func validate(req SubmitMitigationCheckRequest) []string {
 		bad = append(bad, "check_profile_id")
 	}
 	// substrate_selector is optional (LLD §10.1) — no constraint.
+
+	// execution_mode is optional; when set it must be a known adapter.
+	if m := req.ExecutionMode; m != "" && m != execLocal && m != execACI {
+		bad = append(bad, "execution_mode")
+	}
 
 	// Nested artifact bodies are optional, but validated when present.
 	if len(req.Substrate) > 0 {

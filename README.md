@@ -49,6 +49,30 @@ returns `could-not-test` with a reason.
 > swapping in a real ModSecurity container is an adapter change behind the same
 > flow.
 
+### Execution mode: local Docker vs Azure ACI
+
+The substrate can be brought up two ways, selected by the **Execution mode**
+toggle in the UI (or `execution_mode` in the request: `local` | `aci`). Only the
+bring-up/teardown differs — the WAF, test, and verdict are identical.
+
+- **`local`** (default) — `docker run` on the host daemon (`docker.sock`). What
+  Docker Compose uses.
+- **`aci`** — Azure Container Instances. For when the API is hosted on **Azure
+  Container Apps**, which can't mount a Docker socket or launch sibling
+  containers. The adapter creates a per-run ACI container group, runs the test
+  against it over the network, then deletes it (LLD §3.3, §6.4 pluggable
+  substrate adapter). It authenticates with `DefaultAzureCredential` (a managed
+  identity on ACA, or env/`az` locally) and needs:
+
+  ```
+  AZURE_SUBSCRIPTION_ID, MC_ACI_RESOURCE_GROUP, MC_ACI_REGION
+  ```
+
+  Optional: `MC_ACI_CPU`, `MC_ACI_MEMORY_GB`, and private-registry creds via
+  `MC_ACI_REGISTRY_*` (falls back to `JFROG_*`). When Azure isn't configured, an
+  `aci` run returns `could-not-test` with that reason rather than failing — so
+  the mode is selectable everywhere; real execution needs Azure.
+
 ## Step 3 — Run ledger
 
 Every submitted run is recorded in an in-memory ledger (LLD §11.1), keeping the

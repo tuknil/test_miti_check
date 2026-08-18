@@ -61,8 +61,10 @@ type Actual struct {
 
 type SubInfo struct {
 	Image       string `json:"image"`
+	Runner      string `json:"runner,omitempty"` // "local" | "aci"
 	ContainerID string `json:"container_id,omitempty"`
 	HostPort    int    `json:"host_port,omitempty"`
+	FQDN        string `json:"fqdn,omitempty"` // ACI public FQDN
 	Ready       bool   `json:"ready"`
 }
 
@@ -72,6 +74,22 @@ const (
 	stateCouldNotTest = "could-not-test"
 	stateMalfunction  = "malfunction"
 )
+
+// Execution modes select which substrate adapter brings up the target.
+const (
+	execLocal = "local" // docker on the host daemon (docker.sock)
+	execACI   = "aci"   // Azure Container Instances (ACA-compatible; no docker.sock)
+)
+
+// substrate is a brought-up validation target ready to receive test traffic.
+type substrate struct {
+	base    string // http base URL of the target, e.g. http://host:8080
+	cleanup func() // teardown (idempotent)
+}
+
+// substrateRunner brings up the target for one run. A non-empty reason means it
+// could not be brought up (→ could-not-test); base/cleanup are then unused.
+type substrateRunner func(ctx context.Context, out *RunOutcome, sub SubstrateSpec, runID string) (*substrate, string)
 
 // executeScenario runs the full bring-up → apply → test → observe → teardown loop.
 // It requires the inline substrate/candidate/test_basis bodies to be present.
@@ -106,45 +124,33 @@ func executeScenario(ctx context.Context, req SubmitMitigationCheckRequest, runI
 	}
 	out.Steps = append(out.Steps, "parsed candidate SecRule id="+waf.ruleID+" (deny→"+strconv.Itoa(waf.status)+")")
 
-	// 1. Bring up the substrate container.
-	if err := dockerAvailable(ctx); err != nil {
-		return couldNotTest(out, "docker not available: "+err.Error())
+	// 1. Bring up the substrate via the selected adapter. The rest of the flow
+	// (apply WAF, run test, verdict) is identical regardless of where it runs.
+	mode := req.ExecutionMode
+	if mode == "" {
+		mode = execLocal
 	}
-	out.Steps = append(out.Steps, "docker available")
+	out.Substrate.Runner = mode
+	out.Steps = append(out.Steps, "execution mode: "+mode)
 
-	// Two connection modes:
-	//  - network mode (containerized): attach the substrate to a shared docker
-	//    network (MC_SUBSTRATE_NETWORK) and reach it by container name:8080.
-	//  - local mode: publish the substrate on 127.0.0.1:<free-port>.
-	network := os.Getenv("MC_SUBSTRATE_NETWORK")
-	var cid, base string
-	if network != "" {
-		name := runID // unique per submit → safe container name on the network
-		cid, err = startContainerNet(ctx, sub.Image, name, network)
-		if err != nil {
-			return couldNotTest(out, "could not start substrate container: "+trimErr(err))
-		}
-		base = "http://" + name + ":8080"
-		out.Substrate.HostPort = 8080
-		out.Steps = append(out.Steps, "started container "+shortID(cid)+" from "+sub.Image+" on network "+network+" as "+name+":8080")
-	} else {
-		var port int
-		port, err = freePort()
-		if err != nil {
-			return couldNotTest(out, "no free host port for substrate")
-		}
-		out.Substrate.HostPort = port
-		cid, err = startContainer(ctx, sub.Image, port)
-		if err != nil {
-			return couldNotTest(out, "could not start substrate container: "+trimErr(err))
-		}
-		base = fmt.Sprintf("http://127.0.0.1:%d", port)
-		out.Steps = append(out.Steps, "started container "+shortID(cid)+" from "+sub.Image+" on 127.0.0.1:"+strconv.Itoa(port))
+	var runner substrateRunner
+	switch mode {
+	case execLocal:
+		runner = bringUpLocalSubstrate
+	case execACI:
+		runner = bringUpACISubstrate
+	default:
+		return couldNotTest(out, "unknown execution_mode: "+mode+" (use 'local' or 'aci')")
 	}
-	out.Substrate.ContainerID = shortID(cid)
-	defer func() { _ = stopContainer(cid) }()
 
-	if err := waitReady(ctx, base, 90*time.Second); err != nil {
+	sb, reason := runner(ctx, &out, sub, runID)
+	if reason != "" {
+		return couldNotTest(out, reason)
+	}
+	defer sb.cleanup()
+	base := sb.base
+
+	if err := waitReady(ctx, base, 120*time.Second); err != nil {
 		return couldNotTest(out, "substrate did not become ready: "+err.Error())
 	}
 	out.Substrate.Ready = true
@@ -292,6 +298,46 @@ func urlDecode(s string) string {
 }
 
 // ---- Docker substrate lifecycle ----
+
+// bringUpLocalSubstrate runs the substrate on the host Docker daemon (docker.sock).
+//   - network mode (containerized API): attach to a shared docker network
+//     (MC_SUBSTRATE_NETWORK) and reach it by container name:8080.
+//   - local mode: publish on 127.0.0.1:<free-port>.
+func bringUpLocalSubstrate(ctx context.Context, out *RunOutcome, sub SubstrateSpec, runID string) (*substrate, string) {
+	if err := dockerAvailable(ctx); err != nil {
+		return nil, "docker not available: " + err.Error()
+	}
+	out.Steps = append(out.Steps, "docker available")
+
+	network := os.Getenv("MC_SUBSTRATE_NETWORK")
+	var cid, base string
+	if network != "" {
+		name := runID // unique per submit → safe container name on the network
+		id, err := startContainerNet(ctx, sub.Image, name, network)
+		if err != nil {
+			return nil, "could not start substrate container: " + trimErr(err)
+		}
+		cid = id
+		base = "http://" + name + ":8080"
+		out.Substrate.HostPort = 8080
+		out.Steps = append(out.Steps, "started container "+shortID(cid)+" from "+sub.Image+" on network "+network+" as "+name+":8080")
+	} else {
+		port, err := freePort()
+		if err != nil {
+			return nil, "no free host port for substrate"
+		}
+		out.Substrate.HostPort = port
+		id, err := startContainer(ctx, sub.Image, port)
+		if err != nil {
+			return nil, "could not start substrate container: " + trimErr(err)
+		}
+		cid = id
+		base = fmt.Sprintf("http://127.0.0.1:%d", port)
+		out.Steps = append(out.Steps, "started container "+shortID(cid)+" from "+sub.Image+" on 127.0.0.1:"+strconv.Itoa(port))
+	}
+	out.Substrate.ContainerID = shortID(cid)
+	return &substrate{base: base, cleanup: func() { _ = stopContainer(cid) }}, ""
+}
 
 func dockerAvailable(ctx context.Context) error {
 	c, cancel := context.WithTimeout(ctx, 5*time.Second)
