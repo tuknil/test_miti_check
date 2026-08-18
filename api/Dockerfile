@@ -14,8 +14,11 @@ FROM alpine:3.20
 RUN apk add --no-cache docker-cli ca-certificates
 WORKDIR /app
 COPY --from=build /out/api /app/api
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 ENV PORT=8137
 EXPOSE 8137
 
-ENTRYPOINT ["/app/api"]
+# Entrypoint optionally logs in to a private registry (JFROG_*), then execs the API.
+ENTRYPOINT ["/entrypoint.sh"]

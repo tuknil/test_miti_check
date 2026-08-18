@@ -74,6 +74,24 @@ automatically. Only `docker compose down -v` deletes the volume.
 
 For a local (non-Docker) API run, point `DATABASE_URL` at any reachable Postgres.
 
+### Pulling substrate images from a private registry (JFrog)
+
+Substrate images can come from any registry — put the full path in the request's
+`substrate.image` (e.g. `mycompany.jfrog.io/docker-nonprod/log4shell-app:1.0`).
+Do **not** put credentials in the request (it is stored immutably in the ledger).
+
+For a private repo, provide credentials to the API container via env — on start
+it runs `docker login` before serving (a no-op when unset, non-fatal on failure):
+
+```bash
+# .env (not committed)
+JFROG_REGISTRY=mycompany.jfrog.io
+JFROG_USER=<user>
+JFROG_TOKEN=<identity-or-access-token>
+```
+
+Then `docker compose up -d`. Use a JFrog identity/access token, not a password.
+
 ## Run it — Docker (recommended)
 
 Both services run as containers via Docker Compose:
