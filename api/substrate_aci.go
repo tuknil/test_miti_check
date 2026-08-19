@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/arm"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/containerinstance/armcontainerinstance/v2"
@@ -77,7 +78,11 @@ func bringUpACISPSubstrate(ctx context.Context, out *RunOutcome, sub SubstrateSp
 // bringUpACIWith creates the per-run ACI container group using the given
 // credential. Shared by the managed-identity and service-principal modes.
 func bringUpACIWith(ctx context.Context, out *RunOutcome, sub SubstrateSpec, runID string, cred azcore.TokenCredential, subID, rg, region string) (*substrate, string) {
-	factory, err := armcontainerinstance.NewClientFactory(subID, cred, nil)
+	// Don't attempt subscription-level resource-provider registration: that is a
+	// one-time admin bootstrap (az provider register -n Microsoft.ContainerInstance),
+	// not something the API's least-privilege identity should need or be able to do.
+	opts := &arm.ClientOptions{DisableRPRegistration: true}
+	factory, err := armcontainerinstance.NewClientFactory(subID, cred, opts)
 	if err != nil {
 		return nil, "azure client init failed: " + err.Error()
 	}

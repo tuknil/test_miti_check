@@ -281,8 +281,11 @@ func handleSubmitRun(w http.ResponseWriter, r *http.Request) {
 	// GitHub runs dispatch a remote workflow (checkout + build + docker pull +
 	// run), which takes longer than a local container bring-up.
 	budget := 3 * time.Minute
-	if req.ExecutionMode == execGitHub || req.ExecutionMode == execGitHubGHCR {
+	switch req.ExecutionMode {
+	case execGitHub, execGitHubGHCR:
 		budget = 12 * time.Minute
+	case execACI, execACISP:
+		budget = 10 * time.Minute // ACI provisioning + image pull + app start
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), budget)
 	defer cancel()
