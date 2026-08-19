@@ -154,7 +154,7 @@ components:
           description: Logical bounded, non-production substrate (optional).
         execution_mode:
           type: string
-          enum: [local, inmemory, aci, aci-sp, github]
+          enum: [local, inmemory, aci, aci-sp, github, github-ghcr]
           default: local
           description: >
             Substrate adapter. "local" runs the target on the host Docker daemon;
@@ -162,7 +162,9 @@ components:
             "aci" runs it as an Azure Container Instance via DefaultAzureCredential;
             "aci-sp" is ACI authenticated with a service principal (env vars);
             "github" dispatches a GitHub Actions workflow that runs the scenario
-            and returns the result.
+            and returns the result;
+            "github-ghcr" is like github but the API first relays the substrate
+            image into the repo's GHCR so the runner needs no source-registry access.
         substrate:
           $ref: "#/components/schemas/SubstrateSpec"
         candidate:
@@ -315,7 +317,7 @@ components:
           type: string
         runner:
           type: string
-          enum: [local, inmemory, aci, aci-sp, github]
+          enum: [local, inmemory, aci, aci-sp, github, github-ghcr]
         container_id:
           type: string
         host_port:

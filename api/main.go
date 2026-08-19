@@ -281,7 +281,7 @@ func handleSubmitRun(w http.ResponseWriter, r *http.Request) {
 	// GitHub runs dispatch a remote workflow (checkout + build + docker pull +
 	// run), which takes longer than a local container bring-up.
 	budget := 3 * time.Minute
-	if req.ExecutionMode == execGitHub {
+	if req.ExecutionMode == execGitHub || req.ExecutionMode == execGitHubGHCR {
 		budget = 12 * time.Minute
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), budget)
@@ -361,7 +361,7 @@ func validate(req SubmitMitigationCheckRequest) []string {
 	// substrate_selector is optional (LLD §10.1) — no constraint.
 
 	// execution_mode is optional; when set it must be a known adapter.
-	if m := req.ExecutionMode; m != "" && m != execLocal && m != execInMemory && m != execACI && m != execACISP && m != execGitHub {
+	if m := req.ExecutionMode; m != "" && m != execLocal && m != execInMemory && m != execACI && m != execACISP && m != execGitHub && m != execGitHubGHCR {
 		bad = append(bad, "execution_mode")
 	}
 

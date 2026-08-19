@@ -60,6 +60,7 @@ const EXEC_NOTES = {
   aci: "Runs the substrate as an Azure Container Instance via DefaultAzureCredential (managed identity on ACA; needs Azure config).",
   "aci-sp": "Azure Container Instance authenticated with a service principal (AZURE_TENANT_ID/CLIENT_ID/CLIENT_SECRET) — works from a laptop or ACA.",
   github: "Dispatches a GitHub Actions workflow that runs the scenario, then stores the retrieved result (needs GitHub config).",
+  "github-ghcr": "Like GitHub Actions, but the API first relays the substrate image into the repo's GHCR (and sets a runner pull secret) so the runner needs no access to the source registry.",
 };
 
 execToggle.addEventListener("click", (e) => {

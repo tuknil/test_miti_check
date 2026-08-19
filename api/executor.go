@@ -77,11 +77,12 @@ const (
 
 // Execution modes select which substrate adapter brings up the target.
 const (
-	execLocal    = "local"    // docker on the host daemon (docker.sock)
-	execInMemory = "inmemory" // in-process target inside the API; no external deps
-	execACI      = "aci"      // Azure Container Instances via DefaultAzureCredential
-	execACISP    = "aci-sp"   // Azure Container Instances via a service principal (env)
-	execGitHub   = "github"   // dispatch a GitHub Actions workflow that runs the scenario
+	execLocal      = "local"       // docker on the host daemon (docker.sock)
+	execInMemory   = "inmemory"    // in-process target inside the API; no external deps
+	execACI        = "aci"         // Azure Container Instances via DefaultAzureCredential
+	execACISP      = "aci-sp"      // Azure Container Instances via a service principal (env)
+	execGitHub     = "github"      // dispatch a GitHub Actions workflow that runs the scenario
+	execGitHubGHCR = "github-ghcr" // github, but relay the image through the repo's GHCR
 )
 
 // substrate is a brought-up validation target ready to receive test traffic.
@@ -131,6 +132,9 @@ func executeScenario(ctx context.Context, req SubmitMitigationCheckRequest, runI
 	// WAF, and verdict all happen remotely.
 	if mode == execGitHub {
 		return runViaGitHub(ctx, req, out)
+	}
+	if mode == execGitHubGHCR {
+		return runViaGitHubGHCR(ctx, req, out)
 	}
 
 	// Compile the candidate rule up front; a rule we cannot parse means we cannot

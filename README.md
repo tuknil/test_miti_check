@@ -113,6 +113,22 @@ bring-up/teardown differs — the WAF, test, and verdict are identical.
   to find it. When GitHub isn't configured a `github` run returns
   `could-not-test`.
 
+- **`github-ghcr`** — a **separate** GitHub mode (does not modify `github`) that
+  **relays the substrate image through the repo's GHCR** first, so the runner
+  needs no access to the source registry (useful when the source is a private
+  Artifactory the runner can't reach). On submit the API:
+  1. sets a repo Actions secret `GHCR_PAT` (libsodium sealed box) so the runner
+     can pull the private relayed image — there is no API to change package
+     visibility, so it grants the runner a read token instead;
+  2. pulls the source image locally, retags it `ghcr.io/<owner>/<name>`, and
+     pushes it (host-daemon push);
+  3. dispatches `.github/workflows/mitigation-check-ghcr.yml`, which logs in to
+     GHCR with `GHCR_PAT` and runs the scenario against the relayed image.
+
+  Requires the API to have local Docker (docker.sock) and a token with
+  **`write:packages`** (push) — the workflow uses the stored token for
+  `read:packages` (pull). The relayed package stays **private**.
+
 ## Step 3 — Run ledger
 
 Every submitted run is recorded in an in-memory ledger (LLD §11.1), keeping the

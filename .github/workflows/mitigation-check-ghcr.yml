@@ -1,0 +1,47 @@
+name: mitigation-check-ghcr
+# Separate from mitigation-check.yml: this one pulls the substrate image the API
+# relayed into the repo owner's GHCR, using the GHCR_PAT secret the API set.
+run-name: mc-${{ inputs.run_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Correlation id from the API
+        required: true
+        type: string
+      scenario:
+        description: base64-encoded SubmitMitigationCheckRequest JSON (image points at GHCR)
+        required: true
+        type: string
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: api/go.mod
+
+      # Pull the relayed (private) image from the owner's GHCR using the token the
+      # API stored as GHCR_PAT (read:packages).
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u ${{ github.repository_owner }} --password-stdin
+
+      - name: Decode scenario
+        run: echo "${{ inputs.scenario }}" | base64 -d > scenario.json
+
+      - name: Run scenario
+        working-directory: api
+        run: go run . run-scenario ../scenario.json > ../result.json
+
+      - name: Show result
+        run: cat result.json
+
+      - name: Upload result
+        uses: actions/upload-artifact@v4
+        with:
+          name: mitigation-check-result
+          path: result.json
