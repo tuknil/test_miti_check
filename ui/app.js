@@ -9,9 +9,9 @@ const SCENARIO = {
   substrate_selector: "substrate:log4j-vulnerable-webserver:container",
   substrate: {
     kind: "container-image",
-    image: "ghcr.io/christophetd/log4shell-vulnerable-app:latest",
-    digest: "sha256:6f88c941c6f2c3a1d1a3d7f0f7f6c0b6f5b4a3c2d1e0f9a8b7c6d5e4f3a2b1c0d",
     port: 8080,
+    image: "artifact.it.att.com/apm0047460-dkr-stage/log4shell-vulnerable-app:latest",
+    digest: "sha256:6f88430688108e512f7405ac3c73d47f5c370780b94182854ea2cddc6bd59929",
     vulnerability_id: "CVE-2021-44228",
   },
   candidate: {

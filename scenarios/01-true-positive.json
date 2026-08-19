@@ -6,8 +6,9 @@
   "substrate_selector": "substrate:log4j-vulnerable-webserver:container",
   "substrate": {
     "kind": "container-image",
-    "image": "ghcr.io/christophetd/log4shell-vulnerable-app:latest",
     "port": 8080,
+    "image": "artifact.it.att.com/apm0047460-dkr-stage/log4shell-vulnerable-app:latest",
+    "digest": "sha256:6f88430688108e512f7405ac3c73d47f5c370780b94182854ea2cddc6bd59929",
     "vulnerability_id": "CVE-2021-44228"
   },
   "candidate": {
