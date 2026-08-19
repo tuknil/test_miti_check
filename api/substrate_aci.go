@@ -16,7 +16,9 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -32,6 +34,19 @@ import (
 const aciSubstratePort int32 = 8080
 
 // bringUpACISubstrate creates a per-run ACI container group for the substrate.
+// azureInsecureClient returns an HTTP client that skips TLS verification when
+// MC_AZURE_INSECURE_TLS is truthy — for a corporate TLS-interception proxy in
+// front of Azure endpoints. Off by default; INSECURE, use only when necessary.
+func azureInsecureClient() *http.Client {
+	switch strings.ToLower(os.Getenv("MC_AZURE_INSECURE_TLS")) {
+	case "1", "true", "yes", "on":
+		return &http.Client{Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // opt-in bypass
+		}}
+	}
+	return nil
+}
+
 func aciConfig() (subID, rg, region string, ok bool) {
 	subID = os.Getenv("AZURE_SUBSCRIPTION_ID")
 	rg = os.Getenv("MC_ACI_RESOURCE_GROUP")
@@ -47,7 +62,11 @@ func bringUpACISubstrate(ctx context.Context, out *RunOutcome, sub SubstrateSpec
 	if !ok {
 		return nil, "azure ACI not configured (set AZURE_SUBSCRIPTION_ID, MC_ACI_RESOURCE_GROUP, MC_ACI_REGION)"
 	}
-	cred, err := azidentity.NewDefaultAzureCredential(nil)
+	credOpts := &azidentity.DefaultAzureCredentialOptions{}
+	if c := azureInsecureClient(); c != nil {
+		credOpts.Transport = c
+	}
+	cred, err := azidentity.NewDefaultAzureCredential(credOpts)
 	if err != nil {
 		return nil, "azure credential unavailable: " + err.Error()
 	}
@@ -68,7 +87,11 @@ func bringUpACISPSubstrate(ctx context.Context, out *RunOutcome, sub SubstrateSp
 	if tenant == "" || clientID == "" || secret == "" {
 		return nil, "azure service principal not configured (set AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET)"
 	}
-	cred, err := azidentity.NewClientSecretCredential(tenant, clientID, secret, nil)
+	credOpts := &azidentity.ClientSecretCredentialOptions{}
+	if c := azureInsecureClient(); c != nil {
+		credOpts.Transport = c
+	}
+	cred, err := azidentity.NewClientSecretCredential(tenant, clientID, secret, credOpts)
 	if err != nil {
 		return nil, "azure service principal credential error: " + err.Error()
 	}
@@ -82,6 +105,9 @@ func bringUpACIWith(ctx context.Context, out *RunOutcome, sub SubstrateSpec, run
 	// one-time admin bootstrap (az provider register -n Microsoft.ContainerInstance),
 	// not something the API's least-privilege identity should need or be able to do.
 	opts := &arm.ClientOptions{DisableRPRegistration: true}
+	if c := azureInsecureClient(); c != nil {
+		opts.Transport = c
+	}
 	factory, err := armcontainerinstance.NewClientFactory(subID, cred, opts)
 	if err != nil {
 		return nil, "azure client init failed: " + err.Error()

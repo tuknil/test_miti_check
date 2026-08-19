@@ -47,6 +47,8 @@ services:
       AZURE_TENANT_ID: ${AZURE_TENANT_ID:-}
       AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:-}
       AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET:-}
+      # Skip TLS verification for Azure endpoints (corporate MITM proxy). INSECURE.
+      MC_AZURE_INSECURE_TLS: ${MC_AZURE_INSECURE_TLS:-}
     ports:
       - "8137:8137"
     volumes:
