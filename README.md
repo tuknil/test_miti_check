@@ -125,9 +125,22 @@ bring-up/teardown differs — the WAF, test, and verdict are identical.
   3. dispatches `.github/workflows/mitigation-check-ghcr.yml`, which logs in to
      GHCR with `GHCR_PAT` and runs the scenario against the relayed image.
 
-  Requires the API to have local Docker (docker.sock) and a token with
-  **`write:packages`** (push) — the workflow uses the stored token for
-  `read:packages` (pull). The relayed package stays **private**.
+  The relay is **daemonless** (a pure-Go registry-to-registry copy via
+  go-containerregistry) — **no local Docker / docker.sock**, so it runs on Azure
+  Container Apps. It needs egress to both registries and a token with
+  **`write:packages`** (push); the workflow uses the stored token for
+  `read:packages` (pull). A private source registry is authenticated from
+  `MC_ACI_REGISTRY_*` / `JFROG_*` env. The relayed package stays **private**.
+
+### Which modes run on Azure Container Apps (no docker.sock)
+
+| Mode | Runs on ACA? | Why |
+|---|---|---|
+| `inmemory` | ✅ | in-process |
+| `aci` / `aci-sp` | ✅ | Azure API, no local Docker |
+| `github` | ✅ | just dispatches over HTTP; substrate runs on the runner |
+| `github-ghcr` | ✅ | daemonless relay + HTTP dispatch |
+| `local` | ❌ | needs the host Docker socket (local dev only) |
 
 ## Step 3 — Run ledger
 

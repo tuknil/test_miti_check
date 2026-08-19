@@ -24,15 +24,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/google/go-containerregistry/pkg/authn"
+	"github.com/google/go-containerregistry/pkg/crane"
 	"golang.org/x/crypto/nacl/box"
 )
 
@@ -152,72 +151,47 @@ func (c *ghClient) ensureRepoSecret(ctx context.Context, repo, name, value strin
 	return nil
 }
 
-// relayImageToGHCR pulls the source image, retags it under ghcr.io/<owner>, and
-// pushes it. Returns the pushed target reference. Needs local docker + a token
-// with write:packages.
-func relayImageToGHCR(ctx context.Context, sourceImage, owner, username, token string) (string, []string, error) {
+// relayImageToGHCR copies the source image to ghcr.io/<owner>/<name> directly
+// registry-to-registry (daemonless, via go-containerregistry) — no local Docker,
+// so it runs on Azure Container Apps. Needs egress to both registries and a GHCR
+// token with write:packages. A private source registry is authenticated from
+// MC_ACI_REGISTRY_* / JFROG_* env when set.
+func relayImageToGHCR(ctx context.Context, sourceImage, owner, ghcrUser, ghcrToken string) (string, []string, error) {
 	var steps []string
 	if strings.TrimSpace(sourceImage) == "" {
 		return "", steps, fmt.Errorf("no substrate image to relay")
 	}
-	if err := dockerCLI(ctx, 300*time.Second, nil, "pull", sourceImage); err != nil {
-		return "", steps, fmt.Errorf("pull %s: %w", sourceImage, err)
-	}
-	steps = append(steps, "relay: pulled "+sourceImage)
-
 	target := ghcrTarget(owner, sourceImage)
-	if err := dockerCLI(ctx, 30*time.Second, nil, "tag", sourceImage, target); err != nil {
-		return "", steps, fmt.Errorf("tag %s: %w", target, err)
+	kc := relayKeychain{
+		ghcrUser:  ghcrUser,
+		ghcrToken: ghcrToken,
+		srcHost:   firstNonEmpty(os.Getenv("MC_ACI_REGISTRY_SERVER"), os.Getenv("JFROG_REGISTRY")),
+		srcUser:   firstNonEmpty(os.Getenv("MC_ACI_REGISTRY_USERNAME"), os.Getenv("JFROG_USER")),
+		srcToken:  firstNonEmpty(os.Getenv("MC_ACI_REGISTRY_PASSWORD"), os.Getenv("JFROG_TOKEN")),
 	}
-	steps = append(steps, "relay: tagged "+target)
-
-	if err := dockerPushWithAuth(ctx, target, username, token); err != nil {
-		return target, steps, fmt.Errorf("push %s: %w", target, err)
+	if err := crane.Copy(sourceImage, target, crane.WithAuthFromKeychain(kc), crane.WithContext(ctx)); err != nil {
+		return target, steps, fmt.Errorf("copy %s -> %s: %w", sourceImage, target, err)
 	}
-	steps = append(steps, "relay: pushed "+target)
+	steps = append(steps, "relay: copied "+sourceImage+" -> "+target+" (daemonless)")
 	return target, steps, nil
 }
 
-// dockerPushWithAuth pushes target using a throwaway DOCKER_CONFIG holding the
-// ghcr.io credential, so the host daemon performs the transfer (no container-side
-// `docker login` network round-trip) and the shared docker config is untouched.
-func dockerPushWithAuth(ctx context.Context, target, username, token string) error {
-	tmp, err := os.MkdirTemp("", "ghcr-cfg-")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(tmp)
-	auth := base64.StdEncoding.EncodeToString([]byte(username + ":" + token))
-	cfg := fmt.Sprintf(`{"auths":{"ghcr.io":{"auth":%q}}}`, auth)
-	if err := os.WriteFile(filepath.Join(tmp, "config.json"), []byte(cfg), 0o600); err != nil {
-		return err
-	}
-	c, cancel := context.WithTimeout(ctx, 300*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(c, "docker", "push", target)
-	cmd.Env = append(os.Environ(), "DOCKER_CONFIG="+tmp)
-	var errb bytes.Buffer
-	cmd.Stderr = &errb
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%s", strings.TrimSpace(errb.String()+" "+err.Error()))
-	}
-	return nil
+// relayKeychain resolves per-registry auth: GHCR creds for ghcr.io, optional
+// source-registry creds for a private source, anonymous otherwise.
+type relayKeychain struct {
+	ghcrUser, ghcrToken        string
+	srcHost, srcUser, srcToken string
 }
 
-// dockerCLI runs `docker <args>` with an optional stdin, capturing stderr.
-func dockerCLI(ctx context.Context, timeout time.Duration, stdin io.Reader, args ...string) error {
-	c, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	cmd := exec.CommandContext(c, "docker", args...)
-	if stdin != nil {
-		cmd.Stdin = stdin
+func (k relayKeychain) Resolve(res authn.Resource) (authn.Authenticator, error) {
+	host := res.RegistryStr()
+	if host == "ghcr.io" {
+		return authn.FromConfig(authn.AuthConfig{Username: k.ghcrUser, Password: k.ghcrToken}), nil
 	}
-	var errb bytes.Buffer
-	cmd.Stderr = &errb
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%s", strings.TrimSpace(errb.String()+" "+err.Error()))
+	if k.srcHost != "" && host == k.srcHost && k.srcUser != "" && k.srcToken != "" {
+		return authn.FromConfig(authn.AuthConfig{Username: k.srcUser, Password: k.srcToken}), nil
 	}
-	return nil
+	return authn.Anonymous, nil
 }
 
 // ghcrTarget maps a source image to ghcr.io/<owner>/<name>:<tag>.
