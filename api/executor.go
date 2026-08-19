@@ -77,10 +77,11 @@ const (
 
 // Execution modes select which substrate adapter brings up the target.
 const (
-	execLocal  = "local"  // docker on the host daemon (docker.sock)
-	execACI    = "aci"    // Azure Container Instances via DefaultAzureCredential
-	execACISP  = "aci-sp" // Azure Container Instances via a service principal (env)
-	execGitHub = "github" // dispatch a GitHub Actions workflow that runs the scenario
+	execLocal    = "local"    // docker on the host daemon (docker.sock)
+	execInMemory = "inmemory" // in-process target inside the API; no external deps
+	execACI      = "aci"      // Azure Container Instances via DefaultAzureCredential
+	execACISP    = "aci-sp"   // Azure Container Instances via a service principal (env)
+	execGitHub   = "github"   // dispatch a GitHub Actions workflow that runs the scenario
 )
 
 // substrate is a brought-up validation target ready to receive test traffic.
@@ -146,6 +147,8 @@ func executeScenario(ctx context.Context, req SubmitMitigationCheckRequest, runI
 	switch mode {
 	case execLocal:
 		runner = bringUpLocalSubstrate
+	case execInMemory:
+		runner = bringUpInMemorySubstrate
 	case execACI:
 		runner = bringUpACISubstrate
 	case execACISP:

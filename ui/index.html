@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>mitigation-check · Runs</title>
-  <link rel="stylesheet" href="styles.css?v=8" />
+  <link rel="stylesheet" href="styles.css?v=9" />
 </head>
 <body>
   <div class="app">
@@ -37,6 +37,7 @@
             <span class="field-label">Execution mode</span>
             <div class="toggle" id="exec-toggle" role="tablist">
               <button type="button" class="toggle-opt active" data-mode="local">Local Docker</button>
+              <button type="button" class="toggle-opt" data-mode="inmemory">In-memory</button>
               <button type="button" class="toggle-opt" data-mode="aci">Azure ACI</button>
               <button type="button" class="toggle-opt" data-mode="aci-sp">Azure ACI (SP)</button>
               <button type="button" class="toggle-opt" data-mode="github">GitHub Actions</button>
@@ -54,6 +55,6 @@
     </main>
   </div>
 
-  <script src="app.js?v=8"></script>
+  <script src="app.js?v=9"></script>
 </body>
 </html>
