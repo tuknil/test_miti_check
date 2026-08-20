@@ -364,7 +364,7 @@ func validate(req SubmitMitigationCheckRequest) []string {
 	// substrate_selector is optional (LLD §10.1) — no constraint.
 
 	// execution_mode is optional; when set it must be a known adapter.
-	if m := req.ExecutionMode; m != "" && m != execLocal && m != execInMemory && m != execACI && m != execACISP && m != execGitHub && m != execGitHubGHCR {
+	if m := req.ExecutionMode; m != "" && m != execLocal && m != execInMemory && m != execACI && m != execACISP && m != execGitHub && m != execGitHubGHCR && m != execFirewall {
 		bad = append(bad, "execution_mode")
 	}
 

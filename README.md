@@ -65,6 +65,18 @@ bring-up/teardown differs — the WAF, test, and verdict are identical.
   Fidelity trade-off: the target is a stand-in, not the real CVE image, so it
   validates the **rule logic**, not the real vulnerable binary (a weaker proof
   than `local`/`aci`). Great for fast rule iteration and CI.
+
+- **`firewall`** — a **separate in-memory evaluator** for **network firewall rules
+  (L3/L4)**, distinct from the L7 WAF path. No substrate/container: it parses the
+  candidate firewall rule and a supplied **network-connection** test (5-tuple) and
+  decides block/pass in-process. Fits Log4Shell as an **egress control** — a rule
+  that denies the outbound JNDI callback (LDAP/RMI) mitigates exploitation.
+
+  Rule syntax (`candidate.rule`): `<action> <proto> <src> -> <dst>[:<port|lo-hi|*>]`,
+  e.g. `deny tcp any -> any:1389`. The test is
+  `{ kind: "network-connection", connection: {protocol, src_ip, dst_ip, dst_port}, expected: {blocked} }`.
+  See `scenarios/05-firewall-egress-block.json` (TP) and
+  `scenarios/06-firewall-egress-miss.json` (FN — rule too narrow).
 - **`aci`** — Azure Container Instances. For when the API is hosted on **Azure
   Container Apps**, which can't mount a Docker socket or launch sibling
   containers. The adapter creates a per-run ACI container group, runs the test

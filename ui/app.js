@@ -57,6 +57,7 @@ let execMode = "local";
 const EXEC_NOTES = {
   local: "Runs the substrate on the host Docker daemon.",
   inmemory: "Runs entirely inside the API — an in-process stand-in target, no Docker/cloud. Fast and portable; validates rule logic, not the real vulnerable image.",
+  firewall: "In-memory L3/L4 firewall-rule evaluation (no substrate). Expects a firewall-rule candidate + a network-connection test — see scenarios/05-06.",
   aci: "Runs the substrate as an Azure Container Instance via DefaultAzureCredential (managed identity on ACA; needs Azure config).",
   "aci-sp": "Azure Container Instance authenticated with a service principal (AZURE_TENANT_ID/CLIENT_ID/CLIENT_SECRET) — works from a laptop or ACA.",
   github: "Dispatches a GitHub Actions workflow that runs the scenario, then stores the retrieved result (needs GitHub config).",
