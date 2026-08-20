@@ -39,6 +39,11 @@ services:
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       GITHUB_WORKFLOW: ${GITHUB_WORKFLOW:-mitigation-check.yml}
       GITHUB_REF: ${GITHUB_REF:-main}
+      # Private source registry (for the github-ghcr relay pull) + optional TLS skip.
+      JFROG_REGISTRY: ${JFROG_REGISTRY:-}
+      JFROG_USER: ${JFROG_USER:-}
+      JFROG_TOKEN: ${JFROG_TOKEN:-}
+      MC_RELAY_INSECURE_TLS: ${MC_RELAY_INSECURE_TLS:-}
       # Azure ACI execution mode (optional).
       AZURE_SUBSCRIPTION_ID: ${AZURE_SUBSCRIPTION_ID:-}
       MC_ACI_RESOURCE_GROUP: ${MC_ACI_RESOURCE_GROUP:-}

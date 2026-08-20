@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -169,7 +170,15 @@ func relayImageToGHCR(ctx context.Context, sourceImage, owner, ghcrUser, ghcrTok
 		srcUser:   firstNonEmpty(os.Getenv("MC_ACI_REGISTRY_USERNAME"), os.Getenv("JFROG_USER")),
 		srcToken:  firstNonEmpty(os.Getenv("MC_ACI_REGISTRY_PASSWORD"), os.Getenv("JFROG_TOKEN")),
 	}
-	if err := crane.Copy(sourceImage, target, crane.WithAuthFromKeychain(kc), crane.WithContext(ctx)); err != nil {
+	opts := []crane.Option{crane.WithAuthFromKeychain(kc), crane.WithContext(ctx)}
+	switch strings.ToLower(os.Getenv("MC_RELAY_INSECURE_TLS")) {
+	case "1", "true", "yes", "on":
+		tr := http.DefaultTransport.(*http.Transport).Clone()
+		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // opt-in bypass
+		opts = append(opts, crane.WithTransport(tr))
+		steps = append(steps, "relay: TLS verification disabled (MC_RELAY_INSECURE_TLS)")
+	}
+	if err := crane.Copy(sourceImage, target, opts...); err != nil {
 		return target, steps, fmt.Errorf("copy %s -> %s: %w", sourceImage, target, err)
 	}
 	steps = append(steps, "relay: copied "+sourceImage+" -> "+target+" (daemonless)")
