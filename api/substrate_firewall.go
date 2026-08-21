@@ -7,10 +7,13 @@ package main
 // in-process. Fits Log4Shell as an egress control: a rule that denies the
 // outbound JNDI callback (LDAP/RMI) mitigates exploitation.
 //
-// Rule syntax (candidate.rule):  <action> <proto> <src> -> <dst>[:<port|lo-hi|*>]
-//   deny  tcp any        -> any:1389
-//   deny  tcp any        -> 10.0.0.0/24:1389-1400
-//   allow tcp 10.0.0.0/8 -> any:443
+// Two candidate.rule syntaxes are accepted:
+//   1) compact:  <action> <proto> <src> -> <dst>[:<port|lo-hi|*>]
+//        deny tcp any -> any:1389
+//   2) iptables (candidate.engine "iptables" or a rule with -j):
+//        -A OUTPUT -p tcp -d 198.51.100.7 --dport 1389 -j DROP
+//        -A OUTPUT -p tcp -m multiport --dports 389,636,1099,1389 -j DROP
+// Either way it is evaluated in-memory against the connection 5-tuple.
 
 import (
 	"context"
@@ -107,10 +110,15 @@ type fwRule struct {
 	action         string // "deny" | "allow"
 	proto          string // "tcp" | "udp" | "any"
 	srcNet, dstNet *net.IPNet
-	portLo, portHi int // 0,0 = any
+	portLo, portHi int          // range; 0,0 = any
+	portSet        map[int]bool // explicit set (iptables multiport); takes precedence
+	chain          string       // iptables chain (informational)
 }
 
 func compileFirewallRule(c CandidateSpec) (*fwRule, error) {
+	if isIptables(c) {
+		return compileIptablesRule(c)
+	}
 	sides := strings.SplitN(c.Rule, "->", 2)
 	if len(sides) != 2 {
 		return nil, fmt.Errorf("expected '<action> <proto> <src> -> <dst>[:port]'")
@@ -157,7 +165,11 @@ func (r *fwRule) matches(c FWConnection) bool {
 			return false
 		}
 	}
-	if !(r.portLo == 0 && r.portHi == 0) {
+	if len(r.portSet) > 0 {
+		if !r.portSet[c.DstPort] {
+			return false
+		}
+	} else if !(r.portLo == 0 && r.portHi == 0) {
 		if c.DstPort < r.portLo || c.DstPort > r.portHi {
 			return false
 		}
@@ -205,4 +217,136 @@ func parsePortRange(s string) (int, int, error) {
 		return 0, 0, fmt.Errorf("invalid port %q", s)
 	}
 	return p, p, nil
+}
+
+// ---- iptables rule syntax ----
+
+// isIptables reports whether the candidate rule is iptables-style rather than the
+// compact "<action> <proto> <src> -> <dst>" form.
+func isIptables(c CandidateSpec) bool {
+	if strings.EqualFold(c.Engine, "iptables") {
+		return true
+	}
+	rule := strings.TrimSpace(c.Rule)
+	return strings.HasPrefix(rule, "iptables") ||
+		strings.HasPrefix(rule, "-A ") || strings.HasPrefix(rule, "-I ") ||
+		strings.Contains(rule, " -j ")
+}
+
+// compileIptablesRule parses a subset of iptables syntax into an fwRule:
+//
+//	[-A|-I <chain>] [-p <proto>] [-s <src>] [-d <dst>]
+//	[-m <mod>] [--dport <port|lo:hi>] [--dports <p,p,lo:hi>] -j <DROP|REJECT|ACCEPT>
+//
+// e.g.  -A OUTPUT -p tcp -d 198.51.100.7 --dport 1389 -j DROP
+func compileIptablesRule(c CandidateSpec) (*fwRule, error) {
+	r := &fwRule{ruleID: firstNonEmpty(c.RuleID, "fw-rule"), proto: "any"}
+	toks := strings.Fields(c.Rule)
+	target := ""
+	for i := 0; i < len(toks); i++ {
+		arg := toks[i]
+		val := ""
+		if i+1 < len(toks) {
+			val = toks[i+1]
+		}
+		switch strings.ToLower(arg) {
+		case "iptables", "ip6tables", "iptables-legacy":
+			// binary name — skip
+		case "-a", "--append", "-i", "--insert":
+			r.chain = val
+			i++
+		case "-p", "--protocol":
+			r.proto = strings.ToLower(val)
+			i++
+		case "-s", "--source", "--src":
+			n, err := parseHostOrCIDR(val)
+			if err != nil {
+				return nil, fmt.Errorf("source: %w", err)
+			}
+			r.srcNet = n
+			i++
+		case "-d", "--destination", "--dst":
+			n, err := parseHostOrCIDR(val)
+			if err != nil {
+				return nil, fmt.Errorf("destination: %w", err)
+			}
+			r.dstNet = n
+			i++
+		case "--dport", "--destination-port":
+			lo, hi, err := parseDport(val)
+			if err != nil {
+				return nil, err
+			}
+			r.portLo, r.portHi = lo, hi
+			i++
+		case "--dports":
+			set, err := parseDports(val)
+			if err != nil {
+				return nil, err
+			}
+			r.portSet = set
+			i++
+		case "-j", "--jump":
+			target = strings.ToUpper(val)
+			i++
+		case "-m", "--match":
+			i++ // skip the module name (tcp, multiport, ...)
+		default:
+			// ignore unrecognized flags/values
+		}
+	}
+	switch target {
+	case "DROP", "REJECT":
+		r.action = "deny"
+	case "ACCEPT":
+		r.action = "allow"
+	default:
+		r.action = strings.ToLower(firstNonEmpty(c.Action, "deny"))
+	}
+	if r.proto == "all" {
+		r.proto = "any"
+	}
+	return r, nil
+}
+
+// parseDport handles an iptables --dport: single port or a "lo:hi" range.
+func parseDport(s string) (int, int, error) {
+	if lo, hi, ok := strings.Cut(s, ":"); ok {
+		l, e1 := strconv.Atoi(strings.TrimSpace(lo))
+		h, e2 := strconv.Atoi(strings.TrimSpace(hi))
+		if e1 != nil || e2 != nil {
+			return 0, 0, fmt.Errorf("invalid port range %q", s)
+		}
+		return l, h, nil
+	}
+	p, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid port %q", s)
+	}
+	return p, p, nil
+}
+
+// parseDports handles an iptables multiport --dports: comma list of ports/ranges.
+func parseDports(s string) (map[int]bool, error) {
+	set := map[int]bool{}
+	for _, part := range strings.Split(s, ",") {
+		part = strings.TrimSpace(part)
+		if lo, hi, ok := strings.Cut(part, ":"); ok {
+			l, e1 := strconv.Atoi(strings.TrimSpace(lo))
+			h, e2 := strconv.Atoi(strings.TrimSpace(hi))
+			if e1 != nil || e2 != nil {
+				return nil, fmt.Errorf("invalid port range %q", part)
+			}
+			for p := l; p <= h && p-l < 65536; p++ {
+				set[p] = true
+			}
+		} else {
+			p, err := strconv.Atoi(part)
+			if err != nil {
+				return nil, fmt.Errorf("invalid port %q", part)
+			}
+			set[p] = true
+		}
+	}
+	return set, nil
 }

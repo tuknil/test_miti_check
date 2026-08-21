@@ -72,11 +72,20 @@ bring-up/teardown differs — the WAF, test, and verdict are identical.
   decides block/pass in-process. Fits Log4Shell as an **egress control** — a rule
   that denies the outbound JNDI callback (LDAP/RMI) mitigates exploitation.
 
-  Rule syntax (`candidate.rule`): `<action> <proto> <src> -> <dst>[:<port|lo-hi|*>]`,
-  e.g. `deny tcp any -> any:1389`. The test is
+  Two `candidate.rule` syntaxes are accepted (both evaluated in-memory against the
+  connection 5-tuple):
+  - **compact:** `<action> <proto> <src> -> <dst>[:<port|lo-hi|*>]`, e.g.
+    `deny tcp any -> any:1389`;
+  - **iptables** (set `engine: "iptables"` or use a rule with `-j`), e.g.
+    `-A OUTPUT -p tcp -m multiport --dports 389,636,1099,1389 -j DROP` — it parses
+    `-p`, `-s`, `-d` (IP/CIDR), `--dport` (single or `lo:hi`), `-m multiport
+    --dports`, and `-j DROP|REJECT|ACCEPT`.
+
+  The test is
   `{ kind: "network-connection", connection: {protocol, src_ip, dst_ip, dst_port}, expected: {blocked} }`.
-  See `scenarios/05-firewall-egress-block.json` (TP) and
-  `scenarios/06-firewall-egress-miss.json` (FN — rule too narrow).
+  See `scenarios/05-firewall-egress-block.json` (compact TP),
+  `scenarios/06-firewall-egress-miss.json` (compact FN) and
+  `scenarios/09-firewall-iptables-block.json` (iptables TP).
 - **`aci`** — Azure Container Instances. For when the API is hosted on **Azure
   Container Apps**, which can't mount a Docker socket or launch sibling
   containers. The adapter creates a per-run ACI container group, runs the test
