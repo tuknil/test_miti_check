@@ -84,8 +84,9 @@ bring-up/teardown differs — the WAF, test, and verdict are identical.
   The test is
   `{ kind: "network-connection", connection: {protocol, src_ip, dst_ip, dst_port}, expected: {blocked} }`.
   See `scenarios/05-firewall-egress-block.json` (compact TP),
-  `scenarios/06-firewall-egress-miss.json` (compact FN) and
-  `scenarios/09-firewall-iptables-block.json` (iptables TP).
+  `scenarios/06-firewall-egress-miss.json` (compact FN),
+  `scenarios/09-firewall-iptables-block.json` (iptables TP) and
+  `scenarios/10-firewall-iptables-miss.json` (iptables FN — rule too narrow).
 - **`aci`** — Azure Container Instances. For when the API is hosted on **Azure
   Container Apps**, which can't mount a Docker socket or launch sibling
   containers. The adapter creates a per-run ACI container group, runs the test
