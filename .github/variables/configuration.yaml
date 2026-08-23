@@ -1,0 +1,32 @@
+###############################
+##    Configuration files    ##
+###############################
+
+################################
+##            CI              ##
+################################
+## Mandatory
+## Files are located in the project repository itself
+## The ci_vars.yaml serves the CI workflow
+## The shared_vars.yaml serves both CI and CD workflows
+## The precedence is given to the last file listed
+local:
+  configuration_files: >
+    ./.github/variables/shared_vars.yaml ./.github/variables/ci_vars.yaml
+
+################################
+##            CD              ##
+################################
+## Mandatory
+## Files are located in the project repository itself
+## The cd_vars.yaml serves the CD workflow
+environment:
+  dev:
+    configuration_files: >
+      ./.github/variables/shared_vars.yaml ./.github/variables/dev/cd_vars.yaml
+  test:
+    configuration_files: >
+      ./.github/variables/shared_vars.yaml ./.github/variables/test/cd_vars.yaml
+  prod:
+    configuration_files: >
+      ./.github/variables/shared_vars.yaml ./.github/variables/prod/cd_vars.yaml

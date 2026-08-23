@@ -1,0 +1,226 @@
+## The Service name as will be used by the pipeline
+## For example: JFrog url and artifact name. Dore report, etc.
+## In case of MonoRepo project, please comment it
+name: 'JANUS-mitigation-check'
+
+mots-id: '36889'
+
+project-acronym: 'JANUS'
+
+technology: 'go'
+
+## Define the required CI flow of the project
+##    'Default': 'Default' - Follows the Helm flow
+##    'Docker' - Build and Upload Docker image to Jfrog
+##    'Helm' - Build and Upload Docker image & Helm package to Jfrog
+##    'OsNativePackage' - Build and Upload OS-native packages (deb/rpm/chocolatey); requires os-package-type below
+
+##    The following flow types are Skipping the CD phase:
+##    'Module' - Build and Upload Build Artifact to Jfrog
+##    'ScanOnly' - Build and Scans only, no artifact will be uploaded to Jfrog
+flow-type: 'Docker'
+
+## OS native package flavor (only used when flow-type is 'OsNativePackage')
+## Legal values: deb | rpm | chocolatey
+os-package-type: ''
+
+# Semantic versioning prefix
+# Define the Major and Minor version of the project
+# The Patch value is automatically concat by the pipeline with the 'build name'
+# Keep the version format as 'X.Y.'
+# e.g. the first run for 1.0. will be set to 1.0.01
+version: '1.0.'
+
+#+--------------------+
+#|    Tools           |
+#+--------------------+
+tools:
+  java:
+    version: '21'
+    distribution: temurin
+  go:
+    version: '1.18.3'
+    command: ''
+
+#+--------------------+
+#|    Sonar           |
+#+--------------------+
+sonar:
+  server: 'https://sonarqube.us'
+
+#+--------------------+
+#|    JFrog           |-----------------------------------------------------------------------------------------
+#+--------------------+
+artifacts-server: 'https://artifact.it.att.com'
+
+#+--------------------+
+#|    Go          |
+#+--------------------+
+go:
+  repository: 'apm0047460-go-group'
+  repository-path: 'repository path'
+
+#+--------------------+
+#|    Docker          |
+#+--------------------+
+docker:
+  repository: 'apm0047460-dkr-group'
+  repository-path: '< repository path >'
+  image-name: '< image name >' # Comment this line when MonoRepo project  
+
+#+--------------------+
+#|    Helm            |
+#+--------------------+
+helm:
+  version: 'v3.12.1'
+  container-registry:
+    server: 'artifact.it.att.com/artifactory/apm*****-hlm-group'
+  spec-image: '<image path definition in Values.yaml file>' # Example: pod.containers.imageName
+  chart-name: '<chart name>' # Comment this line when MonoRepo project
+  chart-path: '<chart-path>' # Comment this line when MonoRepo project
+  timeout: '5m' # Helm operation (install/upgrade/rollback) timeout duration.
+  pre-script: '' # Full path of a script that should run prior the Helm operation (e.g. to collect files from several directories). The script must be located within the code base.
+  repository: apm0047460-hlm-group
+
+#+--------------------+
+#|    Archive         |
+#+--------------------+
+archive:
+  ## Repository - refers to the storage name within the JFrog that holds software artifacts
+  ## Note: replace only the placeholder 'apm*****' with the project itap id
+  ## without any trailing slash (/)
+  repository: 'apm0047460-raw-stage'
+
+  ## Repository Path - Refers to the "location" of an artifact within the repository,
+  ## e.g. 'com/example/my-app'
+  # Repository Path: 'com/example/my-app/'
+  repository-path: '<com/att/<project>'
+
+  ## The archive format
+  ## Available values: "zip" | "tar.gz" | "tar" | "gzip"
+  format: 'zip'
+
+  ## Name of the archived file that will be created and uploaded to JFrog
+  name: 'compressed.zip'
+
+  ## The root path of the folder that needs to be compressed
+  ## and uploaded to JFrog
+  upload-dir: '<archive_dir_to_upload>'
+
+  ## Full path of a script that should run prior the compression (e.g. to collect files from several directories)
+  ## The script must be located within the code base
+  pre-script: ''
+
+  ## Directory path and name that will be created in order to store download files from JFrog
+  ## Default: 'artifacts'
+  download-dir: ''
+
+  ## Extract the archive after downloading it from JFrog
+  ## Default: 'false'
+  ## Set to 'view' to only see the content of the compressed archive file
+  ## Values: ‘true | false | view`
+  extract: 'false'
+
+#+--------------------+
+#|    Debian          |-------------------------------------------------------------------------------------------
+#+--------------------+
+# Use this section when flow-type is OsNativePackage and os-package-type is deb.
+debian:
+  ## Repository - usually a virtual repository within JFrog that holds Debian artifacts and dependencies,
+  ## replace 'apm*****' with the project itap id
+  repository: '<apm*****-deb-group>'
+
+  ## Repository Path - refers to the location of an artifact within the JFrog repository,
+  ## e.g. 'com/example/my-app'
+  repository-path: ''
+
+  ## Debian distribution/suite for repository metadata (must match target VM Ubuntu release codename,
+  ## e.g. jammy, focal, noble): https://wiki.ubuntu.com/DevelopmentCodeNames
+  distribution: 'jammy'
+
+  ## Debian component (usually 'main')
+  component: 'main'
+
+  ## Debian architecture (`all` for architecture-independent packages; use `amd64`/`arm64` only when needed)
+  arch: 'all'
+  ## Optional: source dir that contains debian/ (default: '.')
+  # source-dir: '.'
+
+  ## Optional: artifacts output dir override for deb build action
+  # artifacts-dir: 'debian/artifacts'
+
+
+  #+--------------------+
+  #|    RPM             |-------------------------------------------------------------------------------------------
+  #+--------------------+
+  # Use this section when flow-type is OsNativePackage and os-package-type is rpm.
+rpm:
+  ## Repository - refers to the storage name within the JFrog that holds RPM artifacts
+  ## Note: replace only the placeholder 'apm*****' with the project itap id
+  ## without any trailing slash (/)
+  repository: '<apm*****-rpm-group>'
+
+  ## Repository Path - refers to the location of an artifact within the JFrog repository,
+  ## e.g. 'com/example/my-app'
+  repository-path: ''
+
+  ## Path to RPM spec file inside the repository
+  ## Example: rpm/my-service.spec
+  spec-file: 'rpm/<package-name>.spec'
+
+  ## Comma-separated list of payload globs to package into Source0 tarball for rpmbuild
+  ## Examples: 'build/*' or 'build/*,config/*.yaml'
+  payload-globs: 'build/*'
+
+#+--------------------+
+#|    Chocolatey      |
+#+--------------------+
+# Use this section when flow-type is OsNativePackage and os-package-type is chocolatey.
+chocolatey:
+  # Name in JFrog of the repository that the .nupkg will be uploaded to. eg. 'apm0013622-ngt-group'
+  repository: '<apm*****-ngt-group>'
+
+  # Repository Path - Refers to the "location" of an artifact within the repository, e.g. 'com/example/my-app'. This is the path within the JFrog repository where the .nupkg file will be uploaded. It can be used to organize packages within the repository.
+  repository-path: '<repository path>'
+
+  # Path to the .nuspec file for the Chocolatey package. This should be the relative path from the root of the repository to the .nuspec file that defines the Chocolatey package you want to build and deploy.
+  nuspec-path: '<chocolatey/myapp.nuspec>'
+
+  #  Comma-separated list of glob patterns (folders or file globs) to bundle into workspace.tar.gz
+  #  inside the Chocolatey tools directory. Each entry is expanded relative to the workspace root.
+  #  Examples: "dist"  |  "dist,build"  |  "dist/*.exe,assets/**/*.dll"
+  payload-globs: '<dist,*.json>'
+
+  #  Relative path of the subdirectory inside the nuspec
+  # directory where payload files are staged before packing (e.g. "tools").
+  # This folder is created automatically and must match the path referenced
+  # inside your .nuspec <files> section.
+  subdirectory: '<tools>'
+  # artifact_url and artifact_checksum are intentionally absent here.
+  # For Go services, the composite action bundles a workspace.tar.gz (built from
+  # payload-globs) directly into the Chocolatey tools directory inside the .nupkg.
+  # The chocolateyinstall.ps1 used by this flow only extracts that bundled tar.gz
+  # and does not read or require any external URL or checksum configuration.
+
+
+  #+--------------------+
+  #|    JFrog           |
+  #+--------------------+
+repository-server: 'https://artifact.it.att.com'
+
+#+--------------------+
+#|    TeamUp          |
+#+--------------------+
+teamup:
+  dora:
+    sandbox: 'false'
+    debug: 'false'
+
+#+--------------------+
+#|    Proxy           |
+#+--------------------+
+proxy:
+  host: 'proxy.conexus.svc.local'
+  port: '3128'
+  no-proxy: 'localhost,127.0.0.1'
+itap-id: apm0047460

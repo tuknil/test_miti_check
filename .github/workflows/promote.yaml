@@ -1,0 +1,50 @@
+name: Promote - JFrog Artifact to Gold Repository
+
+on:
+  workflow_dispatch:
+    ## This workflow can be manually triggered via the GitHub UI.
+    inputs:
+      version:
+        description: 'Version to Promote (Required for RevUp users).'
+        default: '1.0.0'
+        required: true
+        type: string
+
+      jfrog_stage_repo:
+        description: 'JFrog Stage Repo of Artifact (Optional only for overriding default path generation).'
+        default: ''
+        required: false
+        type: string
+
+      artifact_path:
+        description: 'Location of the artifact (Optional only for overriding default path generation).'
+        default: ''
+        required: false
+        type: string
+
+      service_name:
+        description: 'Name of the service associated with the artifact being promoted (Optional).'
+        default: ''
+        required: false
+        type: string
+
+      runner_group:
+        description: 'Runner group'
+        default: 'concordia-linux-cpu2-ram7gi'
+        required: false
+        type: string
+
+env:
+  revup_iebus_secret: ${{ secrets.REVUP_EVENTING_SECRET }} # Used by RevUp Actions for Sending Event Data.
+
+jobs:
+  promote:
+    name: Run Promotion to JFrog Gold Repository Workflow
+    secrets: inherit
+    uses: ATT-IDP/revup-workflows/.github/workflows/reusable_workflow_promote.yaml@v5
+    with:
+      version: ${{ inputs.version }}
+      jfrog_stage_repo: ${{ inputs.jfrog_stage_repo }}
+      artifact_path: ${{ inputs.artifact_path }}
+      service_name: ${{ inputs.service_name }}
+      runner_group: ${{ inputs.runner_group }}

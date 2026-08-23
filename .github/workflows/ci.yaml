@@ -1,0 +1,71 @@
+name: CI - Go Build
+
+on:
+  schedule:
+    - cron: '00 02 * * *'
+
+  push:
+    branches: [ "main" ]
+
+  pull_request:
+    types: [ opened, synchronize, reopened ]
+    branches: [ "main" ]
+
+  workflow_dispatch:
+    ## This workflow can be manually triggered via the GitHub UI.
+    ## The inputs defined below determine the steps to execute.
+    ## The `default` value specifies the initial option displayed in the UI only.
+    inputs:
+      enable_sonar:
+        description: 'Enable Sonar'
+        default: true
+        required: true
+        type: boolean
+      enable_veracode_sast:
+        description: 'Enable VeraCode SAST'
+        default: true
+        required: true
+        type: boolean
+      enable_veracode_sca:
+        description: 'Enable VeraCode SCA'
+        default: true
+        required: true
+        type: boolean
+      enable_veracode_pipeline_scan:
+        description: 'Enable VeraCode Pipeline Scan'
+        default: true
+        required: false
+        type: boolean
+      enable_unit_tests:
+        description: 'Enable Unit Tests'
+        default: false
+        required: true
+        type: boolean
+      enable_deployment:
+        description: 'Enable Deployment'
+        default: true
+        required: true
+        type: boolean
+      log_level:
+        description: 'Log level'
+        required: true
+        default: 'info'
+        type: choice
+        options:
+          - info
+          - debug
+
+jobs:
+  run:
+    name: Run Go CI Workflow
+    secrets: inherit
+    uses: ATT-IDP/revup-workflows/.github/workflows/reusable_workflow_go_ci.yaml@v5
+    with:
+      enable_sonar: ${{ github.event.inputs.enable_sonar }}
+      enable_veracode_sast: ${{ github.event.inputs.enable_veracode_sast }}
+      enable_veracode_sca: ${{ github.event.inputs.enable_veracode_sca }}
+      enable_veracode_pipeline_scan: ${{ github.event.inputs.enable_veracode_pipeline_scan }}
+      enable_unit_tests: ${{ github.event.inputs.enable_unit_tests }}
+      enable_deployment: ${{ github.event.inputs.enable_deployment }}
+      log_level: ${{ github.event.inputs.log_level }}
+      runner_group: 'concordia-linux-cpu2-ram7gi'

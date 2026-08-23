@@ -1,0 +1,133 @@
+#+--------------------+
+#|    Build           |
+#+--------------------+
+build:
+  language: 'go'
+  go-get: 'go get ./api/...'
+  go-build: 'build -v ./...'
+  go-vendor: 'mod vendor'
+  go-test: 'test ./...'
+
+#+--------------------+
+#|    Sonar           |
+#+--------------------+
+sonar:
+
+  property: sonar-project.properties
+
+  properties:
+    sonar-debug: 'true'
+    sonar-exclusions: '**/*_test.go'
+    sonar-language: 'go'
+    sonar-sources: '.'
+    sonar-test-inclusions: '**/*_test.go'
+    sonar-tests: '.'
+    sonar-verbose: 'true'
+
+  ## Any other Sonar Analysis property keys can be added here
+  ## Refer to `https://docs.sonarqube.org/latest/analysis/analysis-parameters/`
+  additional-properties: >
+    -Dsonar.log_level='INFO'
+  domain: com.att.janus
+  name: JANUS-mitigation-check
+
+#+--------------------+
+#|    SAST            |-------------------------------------------------------------------------------------------
+#+--------------------+
+veracode-sast:
+
+  ## Define the main language of the code
+  language-type: 'go'
+
+  ## File types to be scanned
+  file-type-for-scan: "-name go.mod -o -name go.sum -o -name cmd -o -name pkg -o -name vendor -o -name veracode.json"
+
+  ## Maximum time (in minutes) to wait for Veracode scan completion.
+  ## Default: 120. Valid range: 1–359.
+  ## IMPORTANT: If increasing this value, also set 'timeout-minutes' on the
+  ## veracode-sast job in your workflow to a value >= this setting.
+  # scan-timeout-minutes: 120
+
+  ## VeraCode properties
+  properties:
+    ## The application name in Veracode
+    ## In case of MonoRepo project, please comment it
+    ## Veracode Profile Name should be as follow:
+    ## <mots-id>-<project-acronym>-<service-name>
+    profile-name: '<profile name>'
+    sandbox-name: ''
+    create-sandbox: null
+    ## The criticality of the application
+    ## Valid values: VeryHigh, High, Medium, Low, VeryLow
+    ## Default: 'VeryHigh'
+    # criticality: 'VeryHigh'
+
+    ## Create a sandbox if not exists in Veracode
+    ## Default: false
+    # create-sandbox: true
+
+    ## The sandbox name if create-sandbox is set to true
+    ## Relevant only for Poly Repo project
+    ## Default: 'Default-Sandbox'
+    # sandbox-name: <sandbox name>
+
+    ## The debug mode
+    ## Default: false
+    # debug: true
+
+
+    #+--------------------+
+    #|  Veracode Pipeline |-----------------------------------------------------------------------------------------------
+    #|        Scan        |-----------------------------------------------------------------------------------------------
+    #+--------------------+
+
+    ## Pipeline scan uses variables from veracode-sast, in addition to below which can be used to reduce false positives
+    #veracode-pipeline-scan:
+    #timeout: 60
+    ## Wildcards can be used, for example: **/node_modules/**,coverage/**,dist/**
+    #file-types-to-exclude: ''
+    #max-retries: 5
+
+
+    #+--------------------+
+    #|    SCA             |-------------------------------------------------------------------------------------------
+    #+--------------------+
+veracode-sca:
+
+  ## VeraCode SCA, Agent Based Scan,  workspace name
+  ## Usually its WS-<motsid>
+  workspace-name: 'WS-36889'
+  ## VeraCode SCA, Agent Based Scan, Project name
+  ## Each Workspace can have multiple projects
+  ## Set it to get customized name.
+  ## Relevant only for Poly Repo project
+  # name: '< Project Name >'
+
+  ## Enable SCA upload on PR events (default behavior is no upload on PR)
+  # upload-on-pr: 'true'
+
+
+  #+--------------------+
+  #|   Quality Gate     |
+  #+--------------------+
+qualitygate:
+  java-full-path: "/usr/bin/java"
+  project-path: "."
+  continues-improvement: 'false'
+
+#+--------------------+
+#|    Tests           |
+#+--------------------+
+tests: #+--------------------+
+
+#|    Docker          |
+#+--------------------+
+docker:
+  dockerfile: 'Dockerfile'
+  build-path: '.'
+
+#+--------------------+
+#|    Deployment      |
+#+--------------------+
+deployment:
+  workflow-id: 'cd.yaml'
