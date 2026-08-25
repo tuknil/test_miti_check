@@ -3,7 +3,7 @@
 #+--------------------+
 build:
   language: 'go'
-  go-get: 'go get ./api/...'
+  go-get: 'get ./api/...'
   go-build: 'build -v ./...'
   go-vendor: 'mod vendor'
   go-test: 'test ./...'
