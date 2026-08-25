@@ -65,18 +65,23 @@ func (s *DatabricksSink) Write(ctx context.Context, outcome RunOutcome) {
 	}
 	payload, err := json.Marshal(outcome)
 	if err != nil {
-		log.Printf("databricks: marshal failed: %v", err)
+		log.Printf("databricks: WRITE FAILED (run %s): marshal: %v", outcome.RunID, err)
 		return
 	}
 	id := newID()
+	log.Printf("databricks: writing row id=%s (run %s, %s) -> %s", id, outcome.RunID, outcome.TerminalState, s.table)
+
 	c, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
+	start := time.Now()
 	q := "INSERT INTO " + s.table + " (run_id, result_id, result_json) VALUES (?, ?, ?)"
 	if _, err := s.db.ExecContext(c, q, id, id, string(payload)); err != nil {
-		log.Printf("databricks: insert failed (id %s): %v", id, err)
+		log.Printf("databricks: WRITE FAILED id=%s (run %s) after %s: %v",
+			id, outcome.RunID, time.Since(start).Round(time.Millisecond), err)
 		return
 	}
-	log.Printf("databricks: wrote row %s", id)
+	log.Printf("databricks: WRITE OK id=%s (run %s) in %s",
+		id, outcome.RunID, time.Since(start).Round(time.Millisecond))
 }
 
 func (s *DatabricksSink) Close() {
