@@ -3,10 +3,10 @@
 #+--------------------+
 build:
   language: 'go'
-  go-get: 'get ./...'
-  go-build: 'build -v ./...'
-  go-vendor: 'mod vendor'
-  go-test: 'test ./...'
+  go-get: '-C api get ./...'
+  go-build: '-C api build -v ./...'
+  go-vendor: '-C api mod vendor'
+  go-test: '-C api test ./...'
 
 #+--------------------+
 #|    Sonar           |

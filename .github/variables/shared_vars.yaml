@@ -39,8 +39,8 @@ tools:
     version: '21'
     distribution: temurin
   go:
-    version: '1.18.3'
-    command: 'cd api && go'
+    version: '1.21.13'
+    command: ''
 
 #+--------------------+
 #|    Sonar           |
