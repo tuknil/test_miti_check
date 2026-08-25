@@ -18,22 +18,22 @@ on:
     inputs:
       enable_sonar:
         description: 'Enable Sonar'
-        default: true
+        default: false
         required: true
         type: boolean
       enable_veracode_sast:
         description: 'Enable VeraCode SAST'
-        default: true
+        default: false
         required: true
         type: boolean
       enable_veracode_sca:
         description: 'Enable VeraCode SCA'
-        default: true
+        default: false
         required: true
         type: boolean
       enable_veracode_pipeline_scan:
         description: 'Enable VeraCode Pipeline Scan'
-        default: true
+        default: false
         required: false
         type: boolean
       enable_unit_tests:
@@ -43,7 +43,7 @@ on:
         type: boolean
       enable_deployment:
         description: 'Enable Deployment'
-        default: true
+        default: false
         required: true
         type: boolean
       log_level:

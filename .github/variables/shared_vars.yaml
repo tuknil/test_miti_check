@@ -65,8 +65,8 @@ go:
 #+--------------------+
 docker:
   repository: 'apm0047460-dkr-group'
-  repository-path: '< repository path >'
-  image-name: '< image name >' # Comment this line when MonoRepo project  
+  repository-path: 'vuln-mitigation-check'
+  image-name: 'vuln-mitigation-check-api' # Comment this line when MonoRepo project  
 
 #+--------------------+
 #|    Helm            |

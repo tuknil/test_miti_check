@@ -124,7 +124,7 @@ tests: #+--------------------+
 #+--------------------+
 docker:
   dockerfile: 'Dockerfile'
-  build-path: '.'
+  build-path: './api'
 
 #+--------------------+
 #|    Deployment      |
