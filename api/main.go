@@ -106,6 +106,7 @@ type APIError struct {
 }
 
 var store *RunStore
+var dbx *DatabricksSink
 
 func main() {
 	// CLI mode used by the GitHub Actions workflow: run one scenario locally
@@ -124,6 +125,9 @@ func main() {
 		log.Fatalf("could not open run ledger: %v", err)
 	}
 	store = s
+
+	// Optional secondary sink (Databricks Delta). nil when DATABRICKS_DSN is unset.
+	dbx = NewDatabricksSink()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/mitigation-check-runs", withCORS(handleRunsCollection))
@@ -153,6 +157,7 @@ func main() {
 	log.Printf("mitigation-check API listening on %s", srv.Addr)
 	err = srv.ListenAndServe()
 	store.Close() // synchronous: guarantees postgres stops cleanly before exit
+	dbx.Close()
 	if err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
@@ -303,6 +308,12 @@ func handleSubmitRun(w http.ResponseWriter, r *http.Request) {
 		Response:      outcome,
 	}); err != nil {
 		log.Printf("ledger: failed to persist run %s: %v", runID, err)
+	}
+
+	// Secondary sink: also write the result to Databricks (best-effort, async so
+	// it never delays or fails the response).
+	if dbx != nil {
+		go dbx.Write(context.Background(), outcome)
 	}
 
 	writeJSON(w, http.StatusOK, outcome)

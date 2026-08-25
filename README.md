@@ -177,6 +177,26 @@ runs are **durable across `docker stop` and `docker rm` of the db container** �
 recreate it and the data is intact; the API's connection pool reconnects
 automatically. Only `docker compose down -v` deletes the volume.
 
+**Optional secondary sink — Databricks.** Besides Postgres, each result can also
+be written to a Databricks Delta table. It is **best-effort and asynchronous** —
+failures are logged and never affect the Postgres write or the API response — and
+is disabled unless `DATABRICKS_DSN` is set. Config (put the DSN, which carries a
+token, in `.env` — never in `docker-compose.yml`):
+
+```
+DATABRICKS_DSN=token:<PAT>@<host>/sql/1.0/warehouses/<id>
+DATABRICKS_CATALOG=...
+DATABRICKS_SCHEMA=...
+DATABRICKS_TABLE=mitigation_check
+```
+
+Target table:
+`mitigation_check(run_id string, result_id string, result_json STRING, primary key(run_id, result_id))`
+— each write uses a fresh random id for both keys and stores the result JSON. The
+host must be reachable from the API and the workspace's IP access list must allow
+it (a `403 "Unauthorized network access"` means the API's egress IP isn't
+allowlisted).
+
 For a local (non-Docker) API run, point `DATABASE_URL` at any reachable Postgres.
 
 ## Run it — Docker (recommended)

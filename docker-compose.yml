@@ -33,6 +33,12 @@ services:
       PORT: "8137"
       DATABASE_URL: postgres://mc:mc@db:5432/mitigation?sslmode=disable
       MC_SUBSTRATE_NETWORK: mitigation-net
+      # Optional secondary sink: also write each result to a Databricks Delta table.
+      # DSN carries a token — set these in a local .env file, never here.
+      DATABRICKS_DSN: ${DATABRICKS_DSN:-}
+      DATABRICKS_CATALOG: ${DATABRICKS_CATALOG:-}
+      DATABRICKS_SCHEMA: ${DATABRICKS_SCHEMA:-}
+      DATABRICKS_TABLE: ${DATABRICKS_TABLE:-}
       # GitHub Actions execution mode (optional). Set in a local .env file.
       GITHUB_REPO: tuknil/test_miti_check
       GITHUB_USERNAME: tuknil
