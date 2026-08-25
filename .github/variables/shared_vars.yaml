@@ -40,7 +40,7 @@ tools:
     distribution: temurin
   go:
     version: '1.18.3'
-    command: ''
+    command: 'cd api && go'
 
 #+--------------------+
 #|    Sonar           |
