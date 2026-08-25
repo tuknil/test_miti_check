@@ -123,7 +123,7 @@ tests: #+--------------------+
 #|    Docker          |
 #+--------------------+
 docker:
-  dockerfile: 'Dockerfile'
+  dockerfile: './api/Dockerfile'
   build-path: './api'
 
 #+--------------------+
