@@ -39,7 +39,7 @@ tools:
     version: '21'
     distribution: temurin
   go:
-    version: '1.21.13'
+    version: '1.26.5'
     command: ''
 
 #+--------------------+
