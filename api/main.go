@@ -203,7 +203,7 @@ func runScenarioCLI(path string) {
 	req.ExecutionMode = execLocal // on the runner, use docker
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	out := executeScenario(ctx, req, "mc-run-"+newID(), "mitigation-check-result:"+newID())
+	out := executeScenario(ctx, req, "mc-run-"+newID(), resultIDPrefix+newID())
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(out)
@@ -306,7 +306,7 @@ func handleSubmitRun(w http.ResponseWriter, r *http.Request) {
 	// the candidate WAF rule, run the supplied test, and resolve a terminal state
 	// (LLD §5, §6.4, §6.5). Bounded by a request-scoped timeout.
 	runID := "mc-run-" + newID()
-	resultID := "mitigation-check-result:" + newID()
+	resultID := resultIDPrefix + newID()
 
 	// GitHub runs dispatch a remote workflow (checkout + build + docker pull +
 	// run), which takes longer than a local container bring-up.

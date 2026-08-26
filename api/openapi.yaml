@@ -339,9 +339,9 @@ components:
         key:
           type: string
           description: >
-            "result_id:<value>", where <value> is exactly what was written to the
-            table's result_id column (bare, without the mitigation-check-result:
-            prefix). Query WHERE result_id = <value>.
+            Equals the top-level result_id: "result_id:<value>", where <value> is
+            exactly what was written to the table's result_id column (bare).
+            Query WHERE result_id = <value>.
           example: "result_id:1c40b2497a6f766452572f2c"
 
     Outcome:

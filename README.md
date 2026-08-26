@@ -179,9 +179,10 @@ automatically. Only `docker compose down -v` deletes the volume.
 
 **Optional secondary sink — Databricks.** Besides Postgres, each result is also
 written to a Databricks Delta table. The `result_id` column is written **bare**
-(without the `mitigation-check-result:` prefix), and the
-[result envelope](#result-envelope)'s `result_ref.key` reports that same value as
-`"result_id:<value>"` so a consumer can `SELECT … WHERE result_id = '<value>'`. The write is **synchronous** so the envelope's
+(the `result_id:<value>` id without its `result_id:` prefix), and both the
+[result envelope](#result-envelope)'s top-level `result_id` and its
+`result_ref.key` report `"result_id:<value>"`, so a consumer can
+`SELECT … WHERE result_id = '<value>'`. The write is **synchronous** so the envelope's
 `status` reflects it — a failure never changes `terminal_state` (still the test
 result) or fails the run, but degrades `status` to `storage-failed`. Disabled
 unless `DATABRICKS_DSN` is set. Config (put the DSN, which carries a token, in
@@ -211,7 +212,7 @@ envelope, then **appends** the full verdict detail (`match`, `expected`, `actual
   "capability": "mitigation-check",
   "contract_id": "mitigation-check@1.0",
   "run_id": "mc-run-…",
-  "result_id": "mitigation-check-result:…",
+  "result_id": "result_id:1c40b2497a6f766452572f2c",
   "terminal_state": "blocked",
   "status": "completed",
   "correlation_id": "mc-request:CVE-2021-44228:waf:1",
@@ -228,10 +229,10 @@ envelope, then **appends** the full verdict detail (`match`, `expected`, `actual
 - `status` — workflow status: `completed`; `storage-failed` if the Databricks
   write failed; `failed` if the run malfunctioned.
 - `correlation_id` — echoed from the request when supplied (optional).
-- `result_ref` — points at the Databricks row for this result. `key` is
-  `"result_id:<value>"`, where `<value>` is exactly what was written to the
-  table's `result_id` column (the id **without** the `mitigation-check-result:`
-  prefix), so a consumer can `SELECT … WHERE result_id = '<value>'`.
+- `result_ref` — points at the Databricks row for this result. `key` equals the
+  top-level `result_id`: `"result_id:<value>"`, where `<value>` is exactly what
+  was written to the table's `result_id` column (bare), so a consumer can
+  `SELECT … WHERE result_id = '<value>'`.
 
 For a local (non-Docker) API run, point `DATABASE_URL` at any reachable Postgres.
 
