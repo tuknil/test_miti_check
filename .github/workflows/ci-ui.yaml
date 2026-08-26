@@ -1,0 +1,27 @@
+name: CI - UI Docker Build and Deploy
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'ui/**'
+      - '.github/workflows/ci-ui.yaml'
+
+  pull_request:
+    types: [ opened, synchronize, reopened ]
+    branches: [ "main" ]
+    paths:
+      - 'ui/**'
+      - '.github/workflows/ci-ui.yaml'
+
+  workflow_dispatch:
+
+jobs:
+  ui-docker-build-validation:
+    name: Docker Build and Deploy (UI)
+    if: github.event_name != 'pull_request'
+    runs-on: concordia-linux-cpu2-ram7gi
+    steps:
+    - uses: actions/checkout@v4
+    - name: Build the Docker image
+      run: docker build . --file ./ui/Dockerfile --tag artifact.it.att.com/apm0047460-dkr-group/vuln-mitigation-check/vuln-mitigation-check-ui:$(date +%s)
