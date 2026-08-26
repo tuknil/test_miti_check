@@ -185,7 +185,7 @@ func enrichEnvelope(out *RunOutcome, correlationID string) {
 		Catalog: os.Getenv("DATABRICKS_CATALOG"),
 		Schema:  os.Getenv("DATABRICKS_SCHEMA"),
 		Table:   firstNonEmpty(os.Getenv("DATABRICKS_TABLE"), "mitigation_check"),
-		Key:     ResultKey{RunID: out.RunID, ResultID: out.ResultID},
+		Key:     "result_id:" + strings.TrimPrefix(out.ResultID, resultIDPrefix),
 	}
 }
 

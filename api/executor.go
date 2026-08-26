@@ -54,19 +54,19 @@ type RunOutcome struct {
 }
 
 // ResultRef points at where the full result row is stored so another service can
-// query it. key carries the primary-key columns and their values.
+// query it. key is "result_id:<value>", where <value> is exactly what was written
+// to the table's result_id column — a consumer queries WHERE result_id = <value>.
 type ResultRef struct {
-	System  string    `json:"system"`
-	Catalog string    `json:"catalog"`
-	Schema  string    `json:"schema"`
-	Table   string    `json:"table"`
-	Key     ResultKey `json:"key"`
+	System  string `json:"system"`
+	Catalog string `json:"catalog"`
+	Schema  string `json:"schema"`
+	Table   string `json:"table"`
+	Key     string `json:"key"`
 }
 
-type ResultKey struct {
-	RunID    string `json:"run_id"`
-	ResultID string `json:"result_id"`
-}
+// resultIDPrefix is stripped from result_id before it is written to Databricks and
+// before it is placed in result_ref.key, so the stored/queried value is bare.
+const resultIDPrefix = "mitigation-check-result:"
 
 type Expected struct {
 	Classification string `json:"classification"`

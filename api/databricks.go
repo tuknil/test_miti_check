@@ -70,9 +70,10 @@ func (s *DatabricksSink) Write(ctx context.Context, outcome RunOutcome) error {
 		log.Printf("databricks: WRITE FAILED (run %s): marshal: %v", outcome.RunID, err)
 		return err
 	}
-	// The row is keyed by the run's real run_id/result_id (the same values the
-	// result envelope reports) so another service can query it by those keys.
-	runID, resultID := outcome.RunID, outcome.ResultID
+	// result_id is written bare (no "mitigation-check-result:" prefix) so consumers
+	// query WHERE result_id = <value>; result_ref.key reports the same bare value.
+	runID := outcome.RunID
+	resultID := strings.TrimPrefix(outcome.ResultID, resultIDPrefix)
 	log.Printf("databricks: writing row (run_id=%s, result_id=%s, %s) -> %s",
 		runID, resultID, outcome.TerminalState, s.table)
 

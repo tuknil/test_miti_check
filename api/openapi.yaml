@@ -324,7 +324,7 @@ components:
       type: object
       description: >
         Pointer to where the full result row is stored so another service can
-        query it. key carries the primary-key columns and their values.
+        query it.
       properties:
         system:
           type: string
@@ -337,12 +337,12 @@ components:
           type: string
           example: mitigation_check
         key:
-          type: object
-          properties:
-            run_id:
-              type: string
-            result_id:
-              type: string
+          type: string
+          description: >
+            "result_id:<value>", where <value> is exactly what was written to the
+            table's result_id column (bare, without the mitigation-check-result:
+            prefix). Query WHERE result_id = <value>.
+          example: "result_id:1c40b2497a6f766452572f2c"
 
     Outcome:
       type: object
