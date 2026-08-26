@@ -31,18 +31,41 @@ import (
 )
 
 // RunOutcome is the executed result surfaced to the UI (a pragmatic superset of
-// MitigationCheckResult@1, LLD §10.2).
+// MitigationCheckResult@1, LLD §10.2). The leading fields are the result envelope;
+// the trailing fields are the full verdict detail (appended, not replaced).
 type RunOutcome struct {
-	RunID         string   `json:"run_id"`
-	ResultID      string   `json:"result_id"`
-	TerminalState string   `json:"terminal_state"`
-	Match         bool     `json:"match"`
-	Expected      Expected `json:"expected"`
-	Actual        Actual   `json:"actual"`
-	Substrate     SubInfo  `json:"substrate"`
-	Steps         []string `json:"steps"`
-	ProseSummary  string   `json:"prose_summary"`
-	Limitations   []string `json:"limitations,omitempty"`
+	Capability    string     `json:"capability"`
+	ContractID    string     `json:"contract_id"`
+	RunID         string     `json:"run_id"`
+	ResultID      string     `json:"result_id"`
+	TerminalState string     `json:"terminal_state"`
+	Status        string     `json:"status"`
+	CorrelationID string     `json:"correlation_id,omitempty"`
+	ResultRef     *ResultRef `json:"result_ref,omitempty"`
+	EvidenceRefs  []string   `json:"evidence_refs"`
+
+	Match        bool     `json:"match"`
+	Expected     Expected `json:"expected"`
+	Actual       Actual   `json:"actual"`
+	Substrate    SubInfo  `json:"substrate"`
+	Steps        []string `json:"steps"`
+	ProseSummary string   `json:"prose_summary"`
+	Limitations  []string `json:"limitations,omitempty"`
+}
+
+// ResultRef points at where the full result row is stored so another service can
+// query it. key carries the primary-key columns and their values.
+type ResultRef struct {
+	System  string    `json:"system"`
+	Catalog string    `json:"catalog"`
+	Schema  string    `json:"schema"`
+	Table   string    `json:"table"`
+	Key     ResultKey `json:"key"`
+}
+
+type ResultKey struct {
+	RunID    string `json:"run_id"`
+	ResultID string `json:"result_id"`
 }
 
 type Expected struct {

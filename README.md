@@ -177,11 +177,14 @@ runs are **durable across `docker stop` and `docker rm` of the db container** �
 recreate it and the data is intact; the API's connection pool reconnects
 automatically. Only `docker compose down -v` deletes the volume.
 
-**Optional secondary sink — Databricks.** Besides Postgres, each result can also
-be written to a Databricks Delta table. It is **best-effort and asynchronous** —
-failures are logged and never affect the Postgres write or the API response — and
-is disabled unless `DATABRICKS_DSN` is set. Config (put the DSN, which carries a
-token, in `.env` — never in `docker-compose.yml`):
+**Optional secondary sink — Databricks.** Besides Postgres, each result is also
+written to a Databricks Delta table, **keyed by the run's real `run_id`/`result_id`**
+(the same values the [result envelope](#result-envelope) reports) so another
+service can query the exact row. The write is **synchronous** so the envelope's
+`status` reflects it — a failure never changes `terminal_state` (still the test
+result) or fails the run, but degrades `status` to `storage-failed`. Disabled
+unless `DATABRICKS_DSN` is set. Config (put the DSN, which carries a token, in
+`.env` — never in `docker-compose.yml`):
 
 ```
 DATABRICKS_DSN=token:<PAT>@<host>/sql/1.0/warehouses/<id>
@@ -191,11 +194,42 @@ DATABRICKS_TABLE=mitigation_check
 ```
 
 Target table:
-`mitigation_check(run_id string, result_id string, result_json STRING, primary key(run_id, result_id))`
-— each write uses a fresh random id for both keys and stores the result JSON. The
-host must be reachable from the API and the workspace's IP access list must allow
-it (a `403 "Unauthorized network access"` means the API's egress IP isn't
-allowlisted).
+`mitigation_check(run_id string, result_id string, result_json STRING, primary key(run_id, result_id))`.
+The host must be reachable from the API and the workspace's IP access list must
+allow it (a `403 "Unauthorized network access"` means the API's egress IP isn't
+allowlisted — the run still returns, with `status: "storage-failed"`).
+
+### Result envelope
+
+Every run response (and the stored ledger/`GET` record) leads with a compact
+envelope, then **appends** the full verdict detail (`match`, `expected`, `actual`,
+`steps`, …):
+
+```json
+{
+  "capability": "mitigation-check",
+  "contract_id": "mitigation-check@1.0",
+  "run_id": "mc-run-…",
+  "result_id": "mitigation-check-result:…",
+  "terminal_state": "blocked",
+  "status": "completed",
+  "correlation_id": "mc-request:CVE-2021-44228:waf:1",
+  "result_ref": {
+    "system": "databricks", "catalog": "…", "schema": "…", "table": "mitigation_check",
+    "key": { "run_id": "mc-run-…", "result_id": "mitigation-check-result:…" }
+  },
+  "evidence_refs": []
+}
+```
+
+- `terminal_state` — the test result (`blocked` / `not-blocked` / `could-not-test`
+  / `scope-declined` / `malfunction`).
+- `status` — workflow status: `completed`; `storage-failed` if the Databricks
+  write failed; `failed` if the run malfunctioned.
+- `correlation_id` — echoed from the request when supplied (optional).
+- `result_ref` — points at the Databricks row for this result; `key` carries the
+  primary-key columns and values so a consumer can
+  `SELECT … WHERE run_id=? AND result_id=?`.
 
 For a local (non-Docker) API run, point `DATABASE_URL` at any reachable Postgres.
 

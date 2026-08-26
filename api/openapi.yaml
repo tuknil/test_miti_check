@@ -167,6 +167,12 @@ components:
             and returns the result;
             "github-ghcr" is like github but the API first relays the substrate
             image into the repo's GHCR so the runner needs no source-registry access.
+        correlation_id:
+          type: string
+          description: >
+            Optional caller correlation id, echoed into the result envelope's
+            correlation_id (omitted from the response when not supplied).
+          example: "mc-request:CVE-2021-44228:waf:1"
         substrate:
           $ref: "#/components/schemas/SubstrateSpec"
         candidate:
@@ -260,14 +266,40 @@ components:
 
     RunOutcome:
       type: object
+      description: >
+        Result envelope (capability .. evidence_refs) with the full verdict detail
+        appended (match .. limitations).
       properties:
+        capability:
+          type: string
+          enum: ["mitigation-check"]
+        contract_id:
+          type: string
+          enum: ["mitigation-check@1.0"]
         run_id:
           type: string
         result_id:
           type: string
         terminal_state:
           type: string
-          enum: [blocked, not-blocked, could-not-test, malfunction]
+          enum: [blocked, not-blocked, could-not-test, scope-declined, malfunction]
+          description: The test result.
+        status:
+          type: string
+          enum: [completed, storage-failed, failed]
+          description: >
+            Workflow status. "completed" on success; "storage-failed" when the
+            Databricks write failed (terminal_state is still the test result);
+            "failed" when the run malfunctioned.
+        correlation_id:
+          type: string
+          description: Echoed from the request; omitted when not supplied.
+        result_ref:
+          $ref: "#/components/schemas/ResultRef"
+        evidence_refs:
+          type: array
+          items:
+            type: string
         match:
           type: boolean
           description: Whether actual.blocked equals expected.blocked.
@@ -287,6 +319,30 @@ components:
           type: array
           items:
             type: string
+
+    ResultRef:
+      type: object
+      description: >
+        Pointer to where the full result row is stored so another service can
+        query it. key carries the primary-key columns and their values.
+      properties:
+        system:
+          type: string
+          example: databricks
+        catalog:
+          type: string
+        schema:
+          type: string
+        table:
+          type: string
+          example: mitigation_check
+        key:
+          type: object
+          properties:
+            run_id:
+              type: string
+            result_id:
+              type: string
 
     Outcome:
       type: object

@@ -48,6 +48,8 @@ type SubmitMitigationCheckRequest struct {
 	// ExecutionMode selects the substrate adapter: "local" (docker, default) or
 	// "aci" (Azure Container Instances, for ACA-hosted deployments).
 	ExecutionMode string `json:"execution_mode,omitempty"`
+	// CorrelationID is echoed into the result envelope (optional).
+	CorrelationID string `json:"correlation_id,omitempty"`
 }
 
 // SubstrateSpec is the inline validation substrate — a bounded, non-production
@@ -164,6 +166,29 @@ func main() {
 }
 
 // handleOpenAPI serves the embedded OpenAPI 3 spec.
+// enrichEnvelope fills the result-envelope fields on the outcome: capability /
+// contract, workflow status, the echoed correlation id, evidence refs, and a
+// result_ref pointing at the Databricks row (keyed by run_id + result_id, the
+// same values written to that table so a consumer can query it).
+func enrichEnvelope(out *RunOutcome, correlationID string) {
+	out.Capability = "mitigation-check"
+	out.ContractID = contractID
+	out.CorrelationID = correlationID
+	out.EvidenceRefs = []string{}
+	if out.TerminalState == stateMalfunction {
+		out.Status = "failed"
+	} else {
+		out.Status = "completed"
+	}
+	out.ResultRef = &ResultRef{
+		System:  "databricks",
+		Catalog: os.Getenv("DATABRICKS_CATALOG"),
+		Schema:  os.Getenv("DATABRICKS_SCHEMA"),
+		Table:   firstNonEmpty(os.Getenv("DATABRICKS_TABLE"), "mitigation_check"),
+		Key:     ResultKey{RunID: out.RunID, ResultID: out.ResultID},
+	}
+}
+
 // runScenarioCLI executes one scenario file and prints the RunOutcome JSON to
 // stdout. Used by the GitHub Actions workflow; keeps stdout JSON-only.
 func runScenarioCLI(path string) {
@@ -296,8 +321,21 @@ func handleSubmitRun(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	outcome := executeScenario(ctx, req, runID, resultID)
+	enrichEnvelope(&outcome, req.CorrelationID)
 
-	// Record the run in the ledger with the exact immutable request bytes.
+	// Secondary sink: write the result to the Databricks table synchronously so the
+	// envelope's status can reflect the write. terminal_state stays the test result;
+	// only status degrades to "storage-failed" when the write fails (the run is not
+	// a hard failure). A malfunction is already "failed", so a write failure there
+	// doesn't change it — but the row is still written for diagnostics.
+	if dbx != nil {
+		if err := dbx.Write(ctx, outcome); err != nil && outcome.TerminalState != stateMalfunction {
+			outcome.Status = "storage-failed"
+		}
+	}
+
+	// Record the run in the ledger (source of truth) with the exact immutable
+	// request bytes and the final envelope (including the resolved status).
 	if err := store.Add(&RunRecord{
 		RunID:         runID,
 		ResultID:      resultID,
@@ -308,12 +346,6 @@ func handleSubmitRun(w http.ResponseWriter, r *http.Request) {
 		Response:      outcome,
 	}); err != nil {
 		log.Printf("ledger: failed to persist run %s: %v", runID, err)
-	}
-
-	// Secondary sink: also write the result to Databricks (best-effort, async so
-	// it never delays or fails the response).
-	if dbx != nil {
-		go dbx.Write(context.Background(), outcome)
 	}
 
 	writeJSON(w, http.StatusOK, outcome)

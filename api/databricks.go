@@ -1,9 +1,10 @@
 package main
 
 // databricks.go is an OPTIONAL secondary sink: besides the Postgres ledger, each
-// run's result is also written to a Databricks Delta table. It is best-effort —
-// failures are logged and never affect the Postgres write or the API response.
-// Disabled entirely when DATABRICKS_DSN is unset.
+// run's result is also written to a Databricks Delta table. The write is
+// synchronous so the result envelope's status can reflect it: a failure never
+// changes terminal_state (still the test result) or fails the run, but degrades
+// status to "storage-failed". Disabled entirely when DATABRICKS_DSN is unset.
 //
 // Env:
 //   DATABRICKS_DSN      token:<PAT>@<host>[:443]/sql/1.0/warehouses/<id>
@@ -56,32 +57,37 @@ func NewDatabricksSink() *DatabricksSink {
 	return &DatabricksSink{db: db, table: qualified}
 }
 
-// Write inserts one row (run_id, result_id, result_json). A fresh random string
-// is used for BOTH run_id and result_id (as requested); result_json is the run
-// outcome. Best-effort: logs and returns on any error.
-func (s *DatabricksSink) Write(ctx context.Context, outcome RunOutcome) {
+// Write inserts one row (run_id, result_id, result_json), keyed by the run's real
+// run_id/result_id (the same values the result envelope reports) so another
+// service can query it. Returns the write error so the caller can reflect a
+// failure in the result envelope's status; the row itself is never a hard failure.
+func (s *DatabricksSink) Write(ctx context.Context, outcome RunOutcome) error {
 	if s == nil {
-		return
+		return nil
 	}
 	payload, err := json.Marshal(outcome)
 	if err != nil {
 		log.Printf("databricks: WRITE FAILED (run %s): marshal: %v", outcome.RunID, err)
-		return
+		return err
 	}
-	id := newID()
-	log.Printf("databricks: writing row id=%s (run %s, %s) -> %s", id, outcome.RunID, outcome.TerminalState, s.table)
+	// The row is keyed by the run's real run_id/result_id (the same values the
+	// result envelope reports) so another service can query it by those keys.
+	runID, resultID := outcome.RunID, outcome.ResultID
+	log.Printf("databricks: writing row (run_id=%s, result_id=%s, %s) -> %s",
+		runID, resultID, outcome.TerminalState, s.table)
 
 	c, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 	start := time.Now()
 	q := "INSERT INTO " + s.table + " (run_id, result_id, result_json) VALUES (?, ?, ?)"
-	if _, err := s.db.ExecContext(c, q, id, id, string(payload)); err != nil {
-		log.Printf("databricks: WRITE FAILED id=%s (run %s) after %s: %v",
-			id, outcome.RunID, time.Since(start).Round(time.Millisecond), err)
-		return
+	if _, err := s.db.ExecContext(c, q, runID, resultID, string(payload)); err != nil {
+		log.Printf("databricks: WRITE FAILED (run_id=%s) after %s: %v",
+			runID, time.Since(start).Round(time.Millisecond), err)
+		return err
 	}
-	log.Printf("databricks: WRITE OK id=%s (run %s) in %s",
-		id, outcome.RunID, time.Since(start).Round(time.Millisecond))
+	log.Printf("databricks: WRITE OK (run_id=%s, result_id=%s) in %s",
+		runID, resultID, time.Since(start).Round(time.Millisecond))
+	return nil
 }
 
 func (s *DatabricksSink) Close() {
