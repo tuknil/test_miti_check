@@ -155,9 +155,10 @@ components:
         execution_mode:
           type: string
           enum: [local, inmemory, firewall, aci, aci-sp, github, github-ghcr]
-          default: local
+          default: inmemory
           description: >
-            Substrate adapter. "local" runs the target on the host Docker daemon;
+            Substrate adapter (defaults to "inmemory" when omitted).
+            "local" runs the target on the host Docker daemon;
             "inmemory" runs an in-process stand-in target inside the API (no Docker/cloud);
             "firewall" evaluates an L3/L4 firewall rule against a network-connection
             test in-process (no substrate);

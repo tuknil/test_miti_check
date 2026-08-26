@@ -128,7 +128,7 @@ func executeScenario(ctx context.Context, req SubmitMitigationCheckRequest, runI
 
 	mode := req.ExecutionMode
 	if mode == "" {
-		mode = execLocal
+		mode = execInMemory // default when the request omits execution_mode
 	}
 	out.Substrate.Runner = mode
 	out.Steps = append(out.Steps, "execution mode: "+mode)

@@ -55,10 +55,10 @@ The substrate can be brought up two ways, selected by the **Execution mode**
 toggle in the UI (or `execution_mode` in the request: `local` | `aci`). Only the
 bring-up/teardown differs — the WAF, test, and verdict are identical.
 
-- **`local`** (default) — `docker run` on the host daemon (`docker.sock`). What
+- **`local`** — `docker run` on the host daemon (`docker.sock`). What
   Docker Compose uses.
 
-- **`inmemory`** — runs the whole scenario **inside the API process**: the target
+- **`inmemory`** (**default** when the request omits `execution_mode`) — runs the whole scenario **inside the API process**: the target
   is an in-process HTTP stand-in (started on a loopback port), with the same
   in-memory WAF in front. **No Docker socket, no external container, no cloud, no
   network** — so it runs anywhere (including ACA) and completes in milliseconds.

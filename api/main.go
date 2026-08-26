@@ -45,8 +45,9 @@ type SubmitMitigationCheckRequest struct {
 	Substrate           json.RawMessage `json:"substrate,omitempty"`
 	Candidate           json.RawMessage `json:"candidate,omitempty"`
 	TestBasis           json.RawMessage `json:"test_basis,omitempty"`
-	// ExecutionMode selects the substrate adapter: "local" (docker, default) or
-	// "aci" (Azure Container Instances, for ACA-hosted deployments).
+	// ExecutionMode selects the substrate adapter. Defaults to "inmemory" when
+	// omitted; other values include "local" (docker), "aci"/"aci-sp", "github",
+	// "github-ghcr", and "firewall".
 	ExecutionMode string `json:"execution_mode,omitempty"`
 	// CorrelationID is echoed into the result envelope (optional).
 	CorrelationID string `json:"correlation_id,omitempty"`
