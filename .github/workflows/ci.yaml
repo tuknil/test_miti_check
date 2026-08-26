@@ -75,7 +75,7 @@ jobs:
     runs-on: concordia-linux-cpu2-ram7gi
     steps:
       - name: 'Docker Build (Validation Only)'
-        uses: ATT-IDP/revup-docker-build@v3
+        uses: gcr.io/cloud-builders/docker@v2
         with:
           build_only: 'true'
           jfrog_username: ${{ secrets.JFROG_USERNAME }}
