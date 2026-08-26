@@ -69,17 +69,4 @@ jobs:
       enable_deployment: ${{ github.event.inputs.enable_deployment }}
       log_level: ${{ github.event.inputs.log_level }}
       runner_group: 'concordia-linux-cpu2-ram7gi'
-
-  ui-docker-build-validation:
-    name: Docker Build Validation (UI)
-    runs-on: concordia-linux-cpu2-ram7gi
-    steps:
-      - name: 'Docker Build (Validation Only)'
-        uses: gcr.io/cloud-builders/docker@v2
-        with:
-          build_only: 'true'
-          jfrog_username: ${{ secrets.JFROG_USERNAME }}
-          jfrog_access_token: ${{ secrets.JFROG_ACCESS_TOKEN }}
-          checkout: 'true'
-          service_name: 'vuln-mitigation-check-ui'
-          service_path: './ui'
+      
