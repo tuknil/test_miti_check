@@ -340,10 +340,9 @@ components:
         key:
           type: string
           description: >
-            Equals the top-level result_id: "result_id:<value>", where <value> is
-            exactly what was written to the table's result_id column (bare).
-            Query WHERE result_id = <value>.
-          example: "result_id:1c40b2497a6f766452572f2c"
+            The result_id value itself — the same string in the top-level result_id
+            and in the table's result_id column. Query WHERE result_id = <key>.
+          example: "mitigation-check-result:1c40b2497a6f766452572f2c"
 
     Outcome:
       type: object
