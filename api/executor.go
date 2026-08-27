@@ -147,8 +147,17 @@ func executeScenario(ctx context.Context, req SubmitMitigationCheckRequest, runI
 	var sub SubstrateSpec
 	var cand CandidateSpec
 	var test TestBasisSpec
-	if err := json.Unmarshal(nonNil(req.Substrate), &sub); err != nil || sub.Image == "" {
-		return couldNotTest(out, "substrate image not provided in request body")
+	if err := json.Unmarshal(nonNil(req.Substrate), &sub); err != nil {
+		sub = SubstrateSpec{} // tolerate absent/garbled substrate; enforced per-mode below
+	}
+	if sub.Image == "" {
+		// In-memory mode needs no real substrate image — the target is an in-process
+		// stand-in — so a request may omit substrate entirely. Other modes bring up a
+		// real container and must be told which image.
+		if mode != execInMemory {
+			return couldNotTest(out, "substrate image not provided in request body")
+		}
+		sub.Image = "(no substrate provided)"
 	}
 	if err := json.Unmarshal(nonNil(req.Candidate), &cand); err != nil || cand.Rule == "" {
 		return couldNotTest(out, "candidate WAF rule not provided in request body")
