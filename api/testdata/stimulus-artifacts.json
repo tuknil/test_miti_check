@@ -1,7 +1,7 @@
 {
   "artifacts": [
     {
-      "mitigation_check_signal": {
+      "mitigation_checkable_signal": {
         "stimulus": {
           "artifact_type": "http-probe",
           "method": "POST",
@@ -25,7 +25,7 @@
       }
     },
     {
-      "mitigation_check_signal": {
+      "mitigation_checkable_signal": {
         "stimulus": {
           "artifact_type": "http-probe",
           "method": "GET",
