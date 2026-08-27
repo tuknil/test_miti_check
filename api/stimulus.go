@@ -113,9 +113,27 @@ func stimulusHeaders(s Stimulus) map[string]string {
 	return h
 }
 
-// parseStimulus accepts either a bare stimulus object or one wrapped as
-// {"stimulus": {...}}.
+// parseStimulus extracts the stimulus from the input JSON. The primary shape is
+//
+//	{ "artifacts": [ { "mitigation_check_signal": { "stimulus": {...} } }, ... ] }
+//
+// where only the FIRST artifact is used. It also accepts the plain fallbacks
+// {"stimulus": {...}} and a bare stimulus object.
 func parseStimulus(data []byte) (Stimulus, error) {
+	var env struct {
+		Artifacts []struct {
+			MitigationCheckSignal struct {
+				Stimulus *Stimulus `json:"stimulus"`
+			} `json:"mitigation_check_signal"`
+		} `json:"artifacts"`
+	}
+	if err := json.Unmarshal(data, &env); err == nil && len(env.Artifacts) > 0 {
+		if s := env.Artifacts[0].MitigationCheckSignal.Stimulus; s != nil {
+			return *s, nil
+		}
+		return Stimulus{}, fmt.Errorf("artifacts[0].mitigation_check_signal.stimulus is missing")
+	}
+
 	var wrap struct {
 		Stimulus *Stimulus `json:"stimulus"`
 	}

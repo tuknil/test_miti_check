@@ -1,0 +1,38 @@
+{
+  "artifacts": [
+    {
+      "mitigation_check_signal": {
+        "stimulus": {
+          "artifact_type": "http-probe",
+          "method": "POST",
+          "path_key": "mcp_stdio_env_config",
+          "query": {},
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "json_body": {
+            "env": {
+              "node_options": "--require C:\\temp\\flowise-loader.js"
+            }
+          },
+          "body_text": null,
+          "content_type": null,
+          "timeout_seconds": 5,
+          "vulnerable_predicate": "body-contains",
+          "vulnerable_marker": "node_options",
+          "baseline_predicate": "body-not-contains"
+        }
+      }
+    },
+    {
+      "mitigation_check_signal": {
+        "stimulus": {
+          "artifact_type": "http-probe",
+          "method": "GET",
+          "path_key": "SECOND_ARTIFACT_SHOULD_BE_IGNORED",
+          "vulnerable_marker": "ignored"
+        }
+      }
+    }
+  ]
+}

@@ -2,8 +2,36 @@ package main
 
 import (
 	"encoding/json"
+	"os"
 	"testing"
 )
+
+func TestParseStimulusFromArtifacts(t *testing.T) {
+	data, err := os.ReadFile("testdata/stimulus-artifacts.json")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	s, err := parseStimulus(data)
+	if err != nil {
+		t.Fatalf("parseStimulus: %v", err)
+	}
+	// The FIRST artifact's stimulus must be used, not the decoy second one.
+	if s.PathKey != "mcp_stdio_env_config" {
+		t.Errorf("path_key = %q, want mcp_stdio_env_config (took wrong artifact?)", s.PathKey)
+	}
+	if s.VulnerableMarker != "node_options" {
+		t.Errorf("vulnerable_marker = %q, want node_options", s.VulnerableMarker)
+	}
+
+	tb, err := TestBasisFromStimulus(s)
+	if err != nil {
+		t.Fatalf("TestBasisFromStimulus: %v", err)
+	}
+	wantBody := `{"env":{"node_options":"--require C:\\temp\\flowise-loader.js"}}`
+	if tb.Request.Body != wantBody {
+		t.Errorf("body\n got %q\nwant %q", tb.Request.Body, wantBody)
+	}
+}
 
 // The exact example stimulus from the input probe.
 const exampleStimulus = `{
