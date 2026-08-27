@@ -156,6 +156,11 @@ func main() {
 		runScenarioCLI(os.Args[2])
 		return
 	}
+	// CLI: convert an http-probe stimulus (file arg or stdin) into a TestBasisSpec.
+	if len(os.Args) > 1 && os.Args[1] == "stimulus-to-testbasis" {
+		stimulusCLI(os.Args[2:])
+		return
+	}
 
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
