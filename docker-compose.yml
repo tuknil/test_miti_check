@@ -75,6 +75,9 @@ services:
     build: ./ui
     image: mitigation-check-ui
     container_name: mitigation-ui
+    environment:
+      # API endpoint the browser calls; injected into env.js at container start.
+      API_BASE: ${API_BASE:-http://localhost:8137}
     ports:
       - "8082:80"
     depends_on:

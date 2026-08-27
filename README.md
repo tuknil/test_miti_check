@@ -257,6 +257,11 @@ docker compose up -d --build
 - API → http://localhost:8137
 - API docs (Swagger UI) → http://localhost:8137/docs · spec at http://localhost:8137/openapi.yaml
 
+The UI's API endpoint is **not hardcoded** — it's injected at container start from the
+`API_BASE` env var (default `http://localhost:8137`). The nginx entrypoint renders
+`env.js` (`window.MC_API_BASE`) via `envsubst`, and the UI reads it (the field stays
+editable for manual override). For ACA, set `API_BASE` to the API app's public FQDN.
+
 Then stop with `docker compose down` (keep `-v` off to preserve the ledger).
 
 **Requires the host Docker socket.** The API launches the validation-substrate
