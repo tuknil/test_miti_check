@@ -224,6 +224,7 @@ function outcomeHTML(o) {
         sub.fqdn ? " · " + esc(sub.fqdn) : ""
       }${sub.host_port ? " · :" + esc(sub.host_port) : ""} · ready=${!!sub.ready}</div>
       <details><summary>execution steps</summary><ol>${steps}</ol></details>
+      <details open><summary>full response JSON</summary><pre class="json-dump">${esc(JSON.stringify(o, null, 2))}</pre></details>
     </div>`;
 }
 
