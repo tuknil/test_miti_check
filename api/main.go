@@ -142,7 +142,7 @@ var dbx *DatabricksSink
 
 // upstreamInputMode selects the separate upstream executor: the mitigation rule is
 // read from a Databricks table referenced by the request's upstream_inputs, instead
-// of the inline candidate. Toggled by env MC_INPUT_UPSTREAM (truthy).
+// of the inline candidate. On by default; set env MC_INPUT_UPSTREAM=0 to disable.
 var upstreamInputMode bool
 
 // dbxReader reads upstream result_json rows from Databricks (upstream mode only).
@@ -169,8 +169,13 @@ func main() {
 	// Optional secondary sink (Databricks Delta). nil when DATABRICKS_DSN is unset.
 	dbx = NewDatabricksSink()
 
-	// Separate upstream executor (rule read from Databricks) — toggled by env.
-	if v := strings.ToLower(strings.TrimSpace(os.Getenv("MC_INPUT_UPSTREAM"))); v == "1" || v == "true" || v == "yes" {
+	// Separate upstream executor (rule read from Databricks) — toggled by env, and
+	// ON by default; set MC_INPUT_UPSTREAM to 0/false/no to use the legacy executor.
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("MC_INPUT_UPSTREAM")))
+	if v == "" {
+		v = "1"
+	}
+	if v == "1" || v == "true" || v == "yes" {
 		upstreamInputMode = true
 		dbxReader = NewDatabricksReader()
 		log.Printf("input contract: UPSTREAM mode (rule read from Databricks via upstream_inputs)")

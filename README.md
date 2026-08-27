@@ -240,8 +240,8 @@ For a local (non-Docker) API run, point `DATABASE_URL` at any reachable Postgres
 
 ### Input contract: rule read from Databricks (upstream mode)
 
-A **separate executor**, selected by the env condition variable
-**`MC_INPUT_UPSTREAM`** (truthy: `1`/`true`/`yes`), serves the same
+A **separate executor**, **on by default** (set env **`MC_INPUT_UPSTREAM`** to
+`0`/`false`/`no` to fall back to the legacy inline-`candidate` executor), serves the same
 `POST /v1/mitigation-check-runs` endpoint with a different input contract. Instead
 of an inline `candidate` rule, the request carries **`upstream_inputs`** — each
 entry's `result_ref` points at a Databricks row — and the mitigation **rule is read
@@ -257,9 +257,9 @@ still comes explicitly** in `test_basis`, as before.
 - The resolved rule is fed to the shared executor, so bring-up / WAF / verdict are
   identical to the default path. A read/parse failure yields `could-not-test`
   (never a fabricated verdict).
-- When `MC_INPUT_UPSTREAM` is unset the default executor runs unchanged (inline
-  `candidate`). Both accept `contract_id: "mitigation-check@1.0"`; upstream mode
-  also accepts the upstream `"defense-generation@1.0"`.
+- Upstream mode is the default; set `MC_INPUT_UPSTREAM=0` to run the legacy
+  executor (inline `candidate`). Both accept `contract_id: "mitigation-check@1.0"`;
+  upstream mode also accepts the upstream `"defense-generation@1.0"`.
 
 ## Run it — Docker (recommended)
 
