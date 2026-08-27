@@ -121,6 +121,48 @@ func TestStimulusQueryAppended(t *testing.T) {
 	}
 }
 
+// TestParseStimulusNoPanic feeds malformed / nil-heavy inputs and asserts none
+// panic (no nil-pointer dereference) and each yields an error where expected.
+func TestParseStimulusNoPanic(t *testing.T) {
+	cases := []struct {
+		name    string
+		in      string
+		wantErr bool
+	}{
+		{"empty", "", true},
+		{"whitespace", "   \n", true},
+		{"json-null", "null", true},
+		{"not-json", "{not json", true},
+		{"empty-object", "{}", false}, // bare zero stimulus
+		{"artifacts-empty", `{"artifacts":[]}`, true},
+		{"artifacts-null", `{"artifacts":null}`, false}, // treated as no envelope -> bare
+		{"artifacts-null-element", `{"artifacts":[null]}`, true},
+		{"artifacts-missing-signal", `{"artifacts":[{}]}`, true},
+		{"artifacts-missing-stimulus", `{"artifacts":[{"mitigation_check_signal":{}}]}`, true},
+		{"artifacts-null-stimulus", `{"artifacts":[{"mitigation_check_signal":{"stimulus":null}}]}`, true},
+		{"artifacts-not-array", `{"artifacts":{"x":1}}`, true},
+		{"stimulus-wrapper", `{"stimulus":{"method":"get"}}`, false},
+		{"bare", `{"method":"post","path_key":"/p"}`, false},
+		{"json_body-null", `{"json_body":null,"body_text":null}`, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s, err := parseStimulus([]byte(c.in)) // must never panic
+			if c.wantErr && err == nil {
+				t.Errorf("expected error, got none")
+			}
+			if !c.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+			if err == nil {
+				if _, err := TestBasisFromStimulus(s); err != nil { // must never panic
+					t.Errorf("TestBasisFromStimulus error: %v", err)
+				}
+			}
+		})
+	}
+}
+
 func TestStimulusContentTypeAdded(t *testing.T) {
 	ct := "application/json"
 	s := Stimulus{Method: "POST", ContentType: &ct}

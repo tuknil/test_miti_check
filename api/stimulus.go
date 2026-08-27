@@ -120,20 +120,38 @@ func stimulusHeaders(s Stimulus) map[string]string {
 // where only the FIRST artifact is used. It also accepts the plain fallbacks
 // {"stimulus": {...}} and a bare stimulus object.
 func parseStimulus(data []byte) (Stimulus, error) {
-	var env struct {
-		Artifacts []struct {
-			MitigationCheckSignal struct {
-				Stimulus *Stimulus `json:"stimulus"`
-			} `json:"mitigation_check_signal"`
-		} `json:"artifacts"`
-	}
-	if err := json.Unmarshal(data, &env); err == nil && len(env.Artifacts) > 0 {
-		if s := env.Artifacts[0].MitigationCheckSignal.Stimulus; s != nil {
-			return *s, nil
-		}
-		return Stimulus{}, fmt.Errorf("artifacts[0].mitigation_check_signal.stimulus is missing")
+	if t := bytes.TrimSpace(data); len(t) == 0 || string(t) == "null" {
+		return Stimulus{}, fmt.Errorf("empty input")
 	}
 
+	// Detect the envelope shape by the presence of a non-null "artifacts" field.
+	// When present it is authoritative: a malformed envelope errors rather than
+	// silently falling through to a plain-object parse.
+	var probe struct {
+		Artifacts json.RawMessage `json:"artifacts"`
+	}
+	if err := json.Unmarshal(data, &probe); err == nil &&
+		len(probe.Artifacts) > 0 && string(bytes.TrimSpace(probe.Artifacts)) != "null" {
+		var env struct {
+			Artifacts []struct {
+				MitigationCheckSignal struct {
+					Stimulus *Stimulus `json:"stimulus"`
+				} `json:"mitigation_check_signal"`
+			} `json:"artifacts"`
+		}
+		if err := json.Unmarshal(data, &env); err != nil {
+			return Stimulus{}, fmt.Errorf("parse artifacts: %w", err)
+		}
+		if len(env.Artifacts) == 0 {
+			return Stimulus{}, fmt.Errorf("artifacts array is empty")
+		}
+		if env.Artifacts[0].MitigationCheckSignal.Stimulus == nil {
+			return Stimulus{}, fmt.Errorf("artifacts[0].mitigation_check_signal.stimulus is missing")
+		}
+		return *env.Artifacts[0].MitigationCheckSignal.Stimulus, nil
+	}
+
+	// Fallbacks: {"stimulus": {...}} or a bare stimulus object.
 	var wrap struct {
 		Stimulus *Stimulus `json:"stimulus"`
 	}
