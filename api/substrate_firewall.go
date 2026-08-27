@@ -41,6 +41,7 @@ func runFirewallInMemory(ctx context.Context, req SubmitMitigationCheckRequest, 
 	if err := json.Unmarshal(nonNil(req.Candidate), &cand); err != nil || strings.TrimSpace(cand.Rule) == "" {
 		return couldNotTest(out, "firewall rule not provided in request body (candidate.rule)")
 	}
+	out.Candidate = &cand // embed the rule so the result is self-contained
 	var test FirewallTestBasis
 	if err := json.Unmarshal(nonNil(req.TestBasis), &test); err != nil || test.Expected.Blocked == nil {
 		return couldNotTest(out, "network-connection test / expected outcome not provided in request body")

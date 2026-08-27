@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -62,22 +63,104 @@ func executeScenarioUpstream(ctx context.Context, req SubmitMitigationCheckReque
 	if dbxReader == nil {
 		return couldNotTest(base, "Databricks reader not configured (DATABRICKS_DSN unset)")
 	}
-	rule, err := dbxReader.ReadRule(ctx, ref)
+	pc, err := dbxReader.ReadCandidate(ctx, ref)
 	if err != nil {
 		return couldNotTest(base, "could not read rule from Databricks "+ref.qualified()+
 			" where result_id="+ref.Key+": "+err.Error())
 	}
 
-	// Feed the resolved rule to the shared executor through the inline candidate slot.
-	cand := CandidateSpec{Kind: "waf-rule", Engine: "modsecurity", Rule: rule, Action: "deny"}
+	// Build the candidate from the upstream metadata + rule string — kind (waf vs
+	// firewall), engine, and action are derived, not hardcoded.
+	rule := strings.TrimSpace(pc.ArtifactContent)
+	cand := CandidateSpec{
+		Kind:   candidateKind(pc, rule),
+		Engine: candidateEngine(pc, rule),
+		Rule:   rule,
+		Action: deriveRuleAction(rule),
+	}
 	if b, e := json.Marshal(cand); e == nil {
 		req.Candidate = b
 	}
+	// A firewall candidate runs on the separate firewall evaluator, not the WAF path.
+	if cand.Kind == "firewall-rule" && req.ExecutionMode != execFirewall {
+		req.ExecutionMode = execFirewall
+	}
+
 	out := executeScenario(ctx, req, runID, resultID)
 	out.Steps = append([]string{
-		"read rule from Databricks " + ref.qualified() + " where result_id=" + ref.Key,
+		"read " + cand.Kind + " from Databricks " + ref.qualified() + " where result_id=" + ref.Key,
 	}, out.Steps...)
 	return out
+}
+
+// candidateKind classifies the rule as "waf-rule" or "firewall-rule" from the
+// upstream selected_control_class, falling back to the rule string's shape.
+func candidateKind(pc PrimaryCandidate, rule string) string {
+	switch strings.ToLower(strings.TrimSpace(pc.SelectedControlClass)) {
+	case "firewall":
+		return "firewall-rule"
+	case "waf":
+		return "waf-rule"
+	}
+	if strings.HasPrefix(strings.TrimSpace(rule), "SecRule") || strings.Contains(rule, "@rx") {
+		return "waf-rule"
+	}
+	return "firewall-rule"
+}
+
+// candidateEngine derives the engine from artifact_type (e.g. "modsecurity-rule"
+// -> "modsecurity", "iptables-rule" -> "iptables"), else infers from the rule.
+func candidateEngine(pc PrimaryCandidate, rule string) string {
+	if at := strings.ToLower(strings.TrimSpace(pc.ArtifactType)); at != "" {
+		return strings.TrimSuffix(at, "-rule")
+	}
+	switch {
+	case strings.HasPrefix(strings.TrimSpace(rule), "SecRule") || strings.Contains(rule, "@rx"):
+		return "modsecurity"
+	case strings.Contains(rule, "-j ") || strings.Contains(rule, "iptables"):
+		return "iptables"
+	}
+	return ""
+}
+
+// reRuleAction matches a disruptive/allow action token as a whole word.
+var reRuleAction = regexp.MustCompile(`\b(deny|drop|block|pass|allow|reject|accept)\b`)
+
+// deriveRuleAction extracts the action from the rule string: the iptables target
+// (-j DROP/REJECT/ACCEPT), else the SecRule action list (last quoted segment),
+// else anywhere in the rule (firewall compact syntax).
+func deriveRuleAction(rule string) string {
+	low := strings.ToLower(rule)
+	if i := strings.Index(low, "-j "); i >= 0 {
+		if f := strings.Fields(low[i+3:]); len(f) > 0 {
+			switch f[0] {
+			case "drop", "reject", "accept":
+				return f[0]
+			}
+		}
+	}
+	if seg, ok := lastQuoted(rule); ok {
+		if m := reRuleAction.FindString(strings.ToLower(seg)); m != "" {
+			return m
+		}
+	}
+	if m := reRuleAction.FindString(low); m != "" {
+		return m
+	}
+	return ""
+}
+
+// lastQuoted returns the content of the last double-quoted segment.
+func lastQuoted(s string) (string, bool) {
+	end := strings.LastIndex(s, `"`)
+	if end <= 0 {
+		return "", false
+	}
+	start := strings.LastIndex(s[:end], `"`)
+	if start < 0 {
+		return "", false
+	}
+	return s[start+1 : end], true
 }
 
 // ruleRefFromUpstream returns the result_ref of the rule entry. Only the rule entry
@@ -126,11 +209,11 @@ func NewDatabricksReader() *DatabricksReader {
 	return &DatabricksReader{db: db}
 }
 
-// ReadRule reads result_json for ref.Key from the referenced table and returns
-// primary_candidate.artifact_content (the mitigation rule).
-func (r *DatabricksReader) ReadRule(ctx context.Context, ref upstreamRef) (string, error) {
+// ReadCandidate reads result_json for ref.Key from the referenced table and returns
+// its primary_candidate (whose artifact_content is the mitigation rule).
+func (r *DatabricksReader) ReadCandidate(ctx context.Context, ref upstreamRef) (PrimaryCandidate, error) {
 	if r == nil || r.db == nil {
-		return "", fmt.Errorf("reader not configured")
+		return PrimaryCandidate{}, fmt.Errorf("reader not configured")
 	}
 	q := "SELECT result_json FROM " + ref.qualified() + " WHERE result_id = ? LIMIT 1"
 	c, cancel := context.WithTimeout(ctx, 60*time.Second)
@@ -141,22 +224,21 @@ func (r *DatabricksReader) ReadRule(ctx context.Context, ref upstreamRef) (strin
 	if err := r.db.QueryRowContext(c, q, ref.Key).Scan(&js); err != nil {
 		log.Printf("databricks reader: READ FAILED (result_id=%s) after %s: %v",
 			ref.Key, time.Since(start).Round(time.Millisecond), err)
-		return "", err
+		return PrimaryCandidate{}, err
 	}
 
 	var res struct {
 		PrimaryCandidate PrimaryCandidate `json:"primary_candidate"`
 	}
 	if err := json.Unmarshal([]byte(js), &res); err != nil {
-		return "", fmt.Errorf("result_json parse: %w", err)
+		return PrimaryCandidate{}, fmt.Errorf("result_json parse: %w", err)
 	}
-	rule := strings.TrimSpace(res.PrimaryCandidate.ArtifactContent)
-	if rule == "" {
-		return "", fmt.Errorf("primary_candidate.artifact_content is empty")
+	if strings.TrimSpace(res.PrimaryCandidate.ArtifactContent) == "" {
+		return PrimaryCandidate{}, fmt.Errorf("primary_candidate.artifact_content is empty")
 	}
 	log.Printf("databricks reader: READ OK (result_id=%s) in %s",
 		ref.Key, time.Since(start).Round(time.Millisecond))
-	return rule, nil
+	return res.PrimaryCandidate, nil
 }
 
 func (r *DatabricksReader) Close() {

@@ -75,11 +75,12 @@ type SubmitMitigationCheckRequest struct {
 // PrimaryCandidate is the upstream defense-generation candidate. artifact_content
 // carries the actual mitigation rule (a ModSecurity SecRule).
 type PrimaryCandidate struct {
-	ArtifactContent string `json:"artifact_content"`
-	ArtifactType    string `json:"artifact_type"`
-	CandidateID     string `json:"candidate_id"`
-	CandidateKind   string `json:"candidate_kind"`
-	Discriminator   string `json:"discriminator"`
+	ArtifactContent      string `json:"artifact_content"`
+	ArtifactType         string `json:"artifact_type"`
+	CandidateID          string `json:"candidate_id"`
+	CandidateKind        string `json:"candidate_kind"`
+	Discriminator        string `json:"discriminator"`
+	SelectedControlClass string `json:"selected_control_class"`
 }
 
 // SubstrateSpec is the inline validation substrate — a bounded, non-production
