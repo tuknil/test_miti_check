@@ -94,6 +94,8 @@ func executeScenarioUpstream(ctx context.Context, req SubmitMitigationCheckReque
 	if b, e := json.Marshal(cand); e == nil {
 		req.Candidate = b
 	}
+	log.Printf("upstream: derived rule (kind=%s engine=%s action=%s candidate_id=%s): %s",
+		cand.Kind, cand.Engine, cand.Action, pc.CandidateID, cand.Rule)
 	// A firewall candidate runs on the separate firewall evaluator, not the WAF path.
 	if cand.Kind == "firewall-rule" && req.ExecutionMode != execFirewall {
 		req.ExecutionMode = execFirewall
@@ -122,6 +124,7 @@ func executeScenarioUpstream(ctx context.Context, req SubmitMitigationCheckReque
 			}
 			if b, e := json.Marshal(tb); e == nil {
 				req.TestBasis = b
+				log.Printf("upstream: derived test_basis from check-generation: %s", string(b))
 			}
 			steps = append(steps, "derived test_basis from check-generation run_result "+
 				checkEntry.ResultRef.qualified()+" where result_id="+checkEntry.ResultRef.Key)
