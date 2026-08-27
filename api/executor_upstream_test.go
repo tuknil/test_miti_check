@@ -98,7 +98,7 @@ func TestCheckGenerationRunResultToTestBasis(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TestBasisFromStimulus: %v", err)
 	}
-	if tb.Request.Method != "POST" || tb.Request.Path != "mcp_stdio_env_config" {
+	if tb.Request.Method != "POST" || tb.Request.Path != "/mcp_stdio_env_config" {
 		t.Errorf("request wrong: %+v", tb.Request)
 	}
 	wantBody := `{"env":{"node_options":"--require C:\\temp\\flowise-loader.js"}}`

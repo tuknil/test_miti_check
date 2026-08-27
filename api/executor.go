@@ -530,8 +530,11 @@ func forward(ctx context.Context, base string, req TestRequest) (int, string, er
 		method = "GET"
 	}
 	path := req.Path
-	if path == "" {
+	switch {
+	case path == "":
 		path = "/"
+	case !strings.HasPrefix(path, "/"):
+		path = "/" + path // join safely: base+path must not merge into the port
 	}
 	httpReq, err := http.NewRequestWithContext(c, method, base+path, strings.NewReader(req.Body))
 	if err != nil {

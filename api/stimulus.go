@@ -83,6 +83,13 @@ func stimulusBody(s Stimulus) (string, error) {
 // query map is non-empty.
 func stimulusPath(pathKey string, query map[string]string) string {
 	p := strings.TrimSpace(pathKey)
+	// path_key is a symbolic key with no leading slash; make it a valid URL path so
+	// base+path doesn't merge the path into the host:port.
+	if p == "" {
+		p = "/"
+	} else if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
 	if len(query) == 0 {
 		return p
 	}

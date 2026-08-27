@@ -70,8 +70,8 @@ func TestTestBasisFromStimulus(t *testing.T) {
 	if tb.Request.Method != "POST" {
 		t.Errorf("method = %q, want POST", tb.Request.Method)
 	}
-	if tb.Request.Path != "mcp_stdio_env_config" {
-		t.Errorf("path = %q", tb.Request.Path)
+	if tb.Request.Path != "/mcp_stdio_env_config" {
+		t.Errorf("path = %q, want /mcp_stdio_env_config (leading slash)", tb.Request.Path)
 	}
 	if tb.Request.Headers["Content-Type"] != "application/json" {
 		t.Errorf("Content-Type header = %q", tb.Request.Headers["Content-Type"])
