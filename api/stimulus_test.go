@@ -138,8 +138,8 @@ func TestParseStimulusNoPanic(t *testing.T) {
 		{"artifacts-null", `{"artifacts":null}`, false}, // treated as no envelope -> bare
 		{"artifacts-null-element", `{"artifacts":[null]}`, true},
 		{"artifacts-missing-signal", `{"artifacts":[{}]}`, true},
-		{"artifacts-missing-stimulus", `{"artifacts":[{"mitigation_check_signal":{}}]}`, true},
-		{"artifacts-null-stimulus", `{"artifacts":[{"mitigation_check_signal":{"stimulus":null}}]}`, true},
+		{"artifacts-missing-stimulus", `{"artifacts":[{"mitigation_checkable_signal":{}}]}`, true},
+		{"artifacts-null-stimulus", `{"artifacts":[{"mitigation_checkable_signal":{"stimulus":null}}]}`, true},
 		{"artifacts-not-array", `{"artifacts":{"x":1}}`, true},
 		{"stimulus-wrapper", `{"stimulus":{"method":"get"}}`, false},
 		{"bare", `{"method":"post","path_key":"/p"}`, false},

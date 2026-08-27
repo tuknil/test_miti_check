@@ -75,7 +75,7 @@ func TestCheckGenerationRunResultToTestBasis(t *testing.T) {
 	resultJSON := `{
       "run_result": {
         "artifacts": [
-          { "mitigation_check_signal": { "stimulus": {
+          { "mitigation_checkable_signal": { "stimulus": {
             "artifact_type": "http-probe",
             "method": "POST",
             "path_key": "mcp_stdio_env_config",

@@ -122,7 +122,7 @@ func stimulusHeaders(s Stimulus) map[string]string {
 
 // parseStimulus extracts the stimulus from the input JSON. The primary shape is
 //
-//	{ "artifacts": [ { "mitigation_check_signal": { "stimulus": {...} } }, ... ] }
+//	{ "artifacts": [ { "mitigation_checkable_signal": { "stimulus": {...} } }, ... ] }
 //
 // where only the FIRST artifact is used. It also accepts the plain fallbacks
 // {"stimulus": {...}} and a bare stimulus object.
@@ -141,9 +141,9 @@ func parseStimulus(data []byte) (Stimulus, error) {
 		len(probe.Artifacts) > 0 && string(bytes.TrimSpace(probe.Artifacts)) != "null" {
 		var env struct {
 			Artifacts []struct {
-				MitigationCheckSignal struct {
+				MitigationCheckableSignal struct {
 					Stimulus *Stimulus `json:"stimulus"`
-				} `json:"mitigation_check_signal"`
+				} `json:"mitigation_checkable_signal"`
 			} `json:"artifacts"`
 		}
 		if err := json.Unmarshal(data, &env); err != nil {
@@ -152,10 +152,10 @@ func parseStimulus(data []byte) (Stimulus, error) {
 		if len(env.Artifacts) == 0 {
 			return Stimulus{}, fmt.Errorf("artifacts array is empty")
 		}
-		if env.Artifacts[0].MitigationCheckSignal.Stimulus == nil {
-			return Stimulus{}, fmt.Errorf("artifacts[0].mitigation_check_signal.stimulus is missing")
+		if env.Artifacts[0].MitigationCheckableSignal.Stimulus == nil {
+			return Stimulus{}, fmt.Errorf("artifacts[0].mitigation_checkable_signal.stimulus is missing")
 		}
-		return *env.Artifacts[0].MitigationCheckSignal.Stimulus, nil
+		return *env.Artifacts[0].MitigationCheckableSignal.Stimulus, nil
 	}
 
 	// Fallbacks: {"stimulus": {...}} or a bare stimulus object.
