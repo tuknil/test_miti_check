@@ -44,13 +44,18 @@ type RunOutcome struct {
 	ResultRef     *ResultRef `json:"result_ref,omitempty"`
 	EvidenceRefs  []string   `json:"evidence_refs"`
 
-	Match        bool     `json:"match"`
-	Expected     Expected `json:"expected"`
-	Actual       Actual   `json:"actual"`
-	Substrate    SubInfo  `json:"substrate"`
-	Steps        []string `json:"steps"`
-	ProseSummary string   `json:"prose_summary"`
-	Limitations  []string `json:"limitations,omitempty"`
+	Match     bool     `json:"match"`
+	Expected  Expected `json:"expected"`
+	Actual    Actual   `json:"actual"`
+	Substrate SubInfo  `json:"substrate"`
+	// Candidate and TestBasis carry the actual mitigation rule and the test that
+	// were run, so a mitigation_check row is self-contained — downstream consumers
+	// need not query the upstream tables the rule/test were sourced from.
+	Candidate    *CandidateSpec `json:"candidate,omitempty"`
+	TestBasis    *TestBasisSpec `json:"test_basis,omitempty"`
+	Steps        []string       `json:"steps"`
+	ProseSummary string         `json:"prose_summary"`
+	Limitations  []string       `json:"limitations,omitempty"`
 }
 
 // ResultRef points at where the full result row is stored so another service can
@@ -158,6 +163,9 @@ func executeScenario(ctx context.Context, req SubmitMitigationCheckRequest, runI
 		StatusCode:     test.Expected.StatusCode,
 	}
 	out.Substrate.Image = sub.Image
+	// Embed the resolved rule and test so the result is self-contained.
+	out.Candidate = &cand
+	out.TestBasis = &test
 
 	// GitHub mode delegates the entire scenario to a GitHub Actions runner, which
 	// runs this same executor (local mode) and returns the result — so bring-up,
@@ -175,7 +183,14 @@ func executeScenario(ctx context.Context, req SubmitMitigationCheckRequest, runI
 	if err != nil {
 		return couldNotTest(out, "could not parse candidate SecRule: "+err.Error())
 	}
+	if cand.RuleID == "" {
+		cand.RuleID = waf.ruleID // reflected in out.Candidate (same value)
+	}
 	out.Steps = append(out.Steps, "parsed candidate SecRule id="+waf.ruleID+" (deny→"+strconv.Itoa(waf.status)+")")
+	if waf.clamped {
+		out.Limitations = append(out.Limitations,
+			"a PCRE quantifier bound >1000 was clamped to 1000 to compile under RE2; matching differs only for inputs longer than ~1000 chars around the match")
+	}
 
 	// 1. Bring up the substrate via the selected adapter. The rest of the flow
 	// (apply WAF, run test, verdict) is identical regardless of where it runs.
@@ -272,9 +287,10 @@ func summarize(o RunOutcome) string {
 // ---- WAF: faithful enforcement of the specific candidate SecRule ----
 
 type wafRule struct {
-	ruleID string
-	status int
-	re     *regexp.Regexp
+	ruleID  string
+	status  int
+	re      *regexp.Regexp
+	clamped bool // a PCRE quantifier bound >1000 was clamped to fit RE2
 	// targets left implicit: URI + header values + body (covers
 	// REQUEST_URI | REQUEST_HEADERS | ARGS | REQUEST_BODY).
 }
@@ -282,18 +298,52 @@ type wafRule struct {
 var (
 	reRuleID = regexp.MustCompile(`\bid:(\d+)`)
 	reStatus = regexp.MustCompile(`\bstatus:(\d+)`)
+	// reQuant matches a bounded quantifier: {n}, {n,}, or {n,m}.
+	reQuant = regexp.MustCompile(`\{(\d+)(,(\d*))?\}`)
 )
+
+// re2MaxRepeat is Go's RE2 hard limit on quantifier counts (regexp/syntax).
+const re2MaxRepeat = 1000
+
+// clampRE2Repeats caps quantifier bounds above RE2's max (1000) so PCRE-style
+// anti-DoS bounds like `.{0,1024}` — which RE2 rejects — compile under Go's
+// regexp. RE2 has no backtracking, so the bound is only a length guard; clamping
+// it 1024→1000 changes matching only for inputs longer than ~1000 chars around the
+// match. Returns whether anything was clamped.
+func clampRE2Repeats(pat string) (string, bool) {
+	changed := false
+	out := reQuant.ReplaceAllStringFunc(pat, func(m string) string {
+		g := reQuant.FindStringSubmatch(m)
+		lo, _ := strconv.Atoi(g[1])
+		if lo > re2MaxRepeat {
+			lo, changed = re2MaxRepeat, true
+		}
+		if g[2] == "" { // {n}
+			return fmt.Sprintf("{%d}", lo)
+		}
+		if g[3] == "" { // {n,}
+			return fmt.Sprintf("{%d,}", lo)
+		}
+		hi, _ := strconv.Atoi(g[3]) // {n,m}
+		if hi > re2MaxRepeat {
+			hi, changed = re2MaxRepeat, true
+		}
+		return fmt.Sprintf("{%d,%d}", lo, hi)
+	})
+	return out, changed
+}
 
 func compileRule(c CandidateSpec) (*wafRule, error) {
 	pattern, ok := extractRx(c.Rule)
 	if !ok {
 		return nil, fmt.Errorf("no @rx operator found")
 	}
+	pattern, clamped := clampRE2Repeats(pattern)
 	re, err := regexp.Compile(pattern)
 	if err != nil {
 		return nil, err
 	}
-	r := &wafRule{re: re, ruleID: c.RuleID, status: 403}
+	r := &wafRule{re: re, ruleID: c.RuleID, status: 403, clamped: clamped}
 	if m := reRuleID.FindStringSubmatch(c.Rule); m != nil && r.ruleID == "" {
 		r.ruleID = m[1]
 	}

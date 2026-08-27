@@ -125,3 +125,4 @@ table.cmp td.diff { color: var(--err); font-weight: 700; }
 .response details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 .response details ol { margin: 8px 0 0; padding-left: 20px; color: var(--muted); font: 12px var(--mono); }
 .response details li { margin: 2px 0; }
+.response details .json-dump { margin: 8px 0 0; padding: 10px; background: var(--panel, rgba(127,127,127,0.08)); border: 1px solid var(--border); border-radius: 6px; font: 12px/1.5 var(--mono); color: var(--text); white-space: pre; overflow-x: auto; max-height: 460px; overflow-y: auto; }

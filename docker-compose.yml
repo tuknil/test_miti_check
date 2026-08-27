@@ -39,6 +39,9 @@ services:
       DATABRICKS_CATALOG: ${DATABRICKS_CATALOG:-}
       DATABRICKS_SCHEMA: ${DATABRICKS_SCHEMA:-}
       DATABRICKS_TABLE: ${DATABRICKS_TABLE:-}
+      # Input contract: when truthy, use the separate upstream executor that reads
+      # the mitigation rule from Databricks via the request's upstream_inputs.
+      MC_INPUT_UPSTREAM: ${MC_INPUT_UPSTREAM:-}
       # GitHub Actions execution mode (optional). Set in a local .env file.
       GITHUB_REPO: tuknil/test_miti_check
       GITHUB_USERNAME: tuknil

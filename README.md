@@ -214,7 +214,10 @@ allowlisted — the run still returns, with `status: "storage-failed"`).
 
 Every run response (and the stored ledger/`GET` record) leads with a compact
 envelope, then **appends** the full verdict detail (`match`, `expected`, `actual`,
-`steps`, …):
+`substrate`, the resolved `candidate` rule and `test_basis`, `steps`, …). The
+`candidate` and `test_basis` are embedded so a `mitigation_check` row is
+self-contained — a downstream consumer reads the rule and test from that row and
+need not query the upstream table the rule was sourced from:
 
 ```json
 {
@@ -244,6 +247,29 @@ envelope, then **appends** the full verdict detail (`match`, `expected`, `actual
   `SELECT … WHERE result_id = '<key>'`.
 
 For a local (non-Docker) API run, point `DATABASE_URL` at any reachable Postgres.
+
+### Input contract: rule read from Databricks (upstream mode)
+
+A **separate executor**, **on by default** (set env **`MC_INPUT_UPSTREAM`** to
+`0`/`false`/`no` to fall back to the legacy inline-`candidate` executor), serves the same
+`POST /v1/mitigation-check-runs` endpoint with a different input contract. Instead
+of an inline `candidate` rule, the request carries **`upstream_inputs`** — each
+entry's `result_ref` points at a Databricks row — and the mitigation **rule is read
+from that row's `result_json.primary_candidate.artifact_content`**. The **test
+still comes explicitly** in `test_basis`, as before.
+
+- The rule entry's `result_ref` gives `{system:"databricks", catalog, schema,
+  table, key}`; the executor runs `SELECT result_json FROM catalog.schema.table
+  WHERE result_id = key` (using `DATABRICKS_DSN`) and extracts
+  `primary_candidate.artifact_content`.
+- `upstream_inputs` may hold two entries (rule + test); for now only the rule
+  entry is used and the test is taken from `test_basis`.
+- The resolved rule is fed to the shared executor, so bring-up / WAF / verdict are
+  identical to the default path. A read/parse failure yields `could-not-test`
+  (never a fabricated verdict).
+- Upstream mode is the default; set `MC_INPUT_UPSTREAM=0` to run the legacy
+  executor (inline `candidate`). Both accept `contract_id: "mitigation-check@1.0"`;
+  upstream mode also accepts the upstream `"defense-generation@1.0"`.
 
 ## Run it — Docker (recommended)
 
