@@ -352,6 +352,16 @@ components:
           $ref: "#/components/schemas/ActualOutcome"
         substrate:
           $ref: "#/components/schemas/SubstrateInfo"
+        candidate:
+          allOf:
+            - $ref: "#/components/schemas/CandidateSpec"
+          description: >
+            The actual mitigation rule that was run (embedded so a mitigation_check
+            row is self-contained; consumers need not query the upstream table).
+        test_basis:
+          allOf:
+            - $ref: "#/components/schemas/TestBasisSpec"
+          description: The actual test that was run (embedded, same rationale).
         steps:
           type: array
           items:

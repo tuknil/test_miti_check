@@ -44,13 +44,18 @@ type RunOutcome struct {
 	ResultRef     *ResultRef `json:"result_ref,omitempty"`
 	EvidenceRefs  []string   `json:"evidence_refs"`
 
-	Match        bool     `json:"match"`
-	Expected     Expected `json:"expected"`
-	Actual       Actual   `json:"actual"`
-	Substrate    SubInfo  `json:"substrate"`
-	Steps        []string `json:"steps"`
-	ProseSummary string   `json:"prose_summary"`
-	Limitations  []string `json:"limitations,omitempty"`
+	Match     bool     `json:"match"`
+	Expected  Expected `json:"expected"`
+	Actual    Actual   `json:"actual"`
+	Substrate SubInfo  `json:"substrate"`
+	// Candidate and TestBasis carry the actual mitigation rule and the test that
+	// were run, so a mitigation_check row is self-contained — downstream consumers
+	// need not query the upstream tables the rule/test were sourced from.
+	Candidate    *CandidateSpec `json:"candidate,omitempty"`
+	TestBasis    *TestBasisSpec `json:"test_basis,omitempty"`
+	Steps        []string       `json:"steps"`
+	ProseSummary string         `json:"prose_summary"`
+	Limitations  []string       `json:"limitations,omitempty"`
 }
 
 // ResultRef points at where the full result row is stored so another service can
@@ -158,6 +163,9 @@ func executeScenario(ctx context.Context, req SubmitMitigationCheckRequest, runI
 		StatusCode:     test.Expected.StatusCode,
 	}
 	out.Substrate.Image = sub.Image
+	// Embed the resolved rule and test so the result is self-contained.
+	out.Candidate = &cand
+	out.TestBasis = &test
 
 	// GitHub mode delegates the entire scenario to a GitHub Actions runner, which
 	// runs this same executor (local mode) and returns the result — so bring-up,
@@ -174,6 +182,9 @@ func executeScenario(ctx context.Context, req SubmitMitigationCheckRequest, runI
 	waf, err := compileRule(cand)
 	if err != nil {
 		return couldNotTest(out, "could not parse candidate SecRule: "+err.Error())
+	}
+	if cand.RuleID == "" {
+		cand.RuleID = waf.ruleID // reflected in out.Candidate (same value)
 	}
 	out.Steps = append(out.Steps, "parsed candidate SecRule id="+waf.ruleID+" (deny→"+strconv.Itoa(waf.status)+")")
 	if waf.clamped {

@@ -204,7 +204,10 @@ allowlisted — the run still returns, with `status: "storage-failed"`).
 
 Every run response (and the stored ledger/`GET` record) leads with a compact
 envelope, then **appends** the full verdict detail (`match`, `expected`, `actual`,
-`steps`, …):
+`substrate`, the resolved `candidate` rule and `test_basis`, `steps`, …). The
+`candidate` and `test_basis` are embedded so a `mitigation_check` row is
+self-contained — a downstream consumer reads the rule and test from that row and
+need not query the upstream table the rule was sourced from:
 
 ```json
 {
