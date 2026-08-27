@@ -270,5 +270,8 @@ form.addEventListener("submit", async (e) => {
 });
 
 // ---- Init ----
+// API endpoint comes from the runtime-injected env (window.MC_API_BASE), falling
+// back to localhost for local dev. The field stays editable for manual override.
+apiBaseInput.value = (window.MC_API_BASE || "http://localhost:8137").trim();
 payloadEl.value = JSON.stringify(SCENARIO, null, 2);
 loadRuns();
