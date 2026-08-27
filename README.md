@@ -64,7 +64,10 @@ bring-up/teardown differs — the WAF, test, and verdict are identical.
   network** — so it runs anywhere (including ACA) and completes in milliseconds.
   Fidelity trade-off: the target is a stand-in, not the real CVE image, so it
   validates the **rule logic**, not the real vulnerable binary (a weaker proof
-  than `local`/`aci`). Great for fast rule iteration and CI.
+  than `local`/`aci`). Great for fast rule iteration and CI. Because the target is
+  a stand-in, the request may **omit `substrate` entirely** in this mode (the
+  result records `image: "(no substrate provided)"`); every other mode still
+  requires `substrate.image` and returns `could-not-test` without it.
 
 - **`firewall`** — a **separate in-memory evaluator** for **network firewall rules
   (L3/L4)**, distinct from the L7 WAF path. No substrate/container: it parses the
