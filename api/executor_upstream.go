@@ -2,15 +2,20 @@ package main
 
 // executor_upstream.go is a SEPARATE executor selected by the env condition
 // variable MC_INPUT_UPSTREAM (truthy). It serves the same POST endpoint but takes
-// the new input contract: instead of an inline candidate rule, the request carries
-// upstream_inputs whose result_ref points at a Databricks row. The mitigation rule
-// is read from that row's result_json (primary_candidate.artifact_content). The
-// test still comes explicitly in the request (test_basis), as before.
+// the new input contract: instead of inline artifacts, the request carries
+// upstream_inputs whose result_refs point at Databricks rows. Entries are selected
+// by capability:
+//   - "defense-generation": the mitigation rule is read from result_json
+//     (primary_candidate.artifact_content);
+//   - "check-generation": the test is derived from result_json.run_result via the
+//     standalone stimulus converter (parseStimulus -> TestBasisFromStimulus).
 //
-// Once the rule is resolved it is fed to the shared executor via the inline
-// candidate slot, so bring-up / WAF / verdict logic is reused unchanged.
+// An inline test_basis in the request wins over the check-generation entry. The
+// resolved rule/test are fed to the shared executor via the inline candidate /
+// test_basis slots, so bring-up / WAF / verdict logic is reused unchanged.
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -20,6 +25,11 @@ import (
 	"regexp"
 	"strings"
 	"time"
+)
+
+const (
+	capDefenseGeneration = "defense-generation"
+	capCheckGeneration   = "check-generation"
 )
 
 // upstreamRef is the result_ref inside an upstream_inputs entry.
@@ -50,27 +60,30 @@ type upstreamInput struct {
 	ResultRef  upstreamRef `json:"result_ref"`
 }
 
-// executeScenarioUpstream resolves the rule from Databricks and delegates the run
-// to the shared executor. Any resolution failure is a could-not-test (never a
-// fabricated verdict).
+// executeScenarioUpstream resolves the rule (and, when needed, the test) from
+// Databricks and delegates the run to the shared executor. Any resolution failure
+// is a could-not-test (never a fabricated verdict).
 func executeScenarioUpstream(ctx context.Context, req SubmitMitigationCheckRequest, runID, resultID string) RunOutcome {
 	base := RunOutcome{RunID: runID, ResultID: resultID}
 
-	ref, err := ruleRefFromUpstream(req.UpstreamInputs)
+	entries, err := parseUpstreamInputs(req.UpstreamInputs)
 	if err != nil {
 		return couldNotTest(base, "upstream_inputs: "+err.Error())
 	}
 	if dbxReader == nil {
 		return couldNotTest(base, "Databricks reader not configured (DATABRICKS_DSN unset)")
 	}
-	pc, err := dbxReader.ReadCandidate(ctx, ref)
-	if err != nil {
-		return couldNotTest(base, "could not read rule from Databricks "+ref.qualified()+
-			" where result_id="+ref.Key+": "+err.Error())
-	}
 
-	// Build the candidate from the upstream metadata + rule string — kind (waf vs
-	// firewall), engine, and action are derived, not hardcoded.
+	// Rule comes from the defense-generation entry.
+	ruleEntry := selectByCapability(entries, capDefenseGeneration)
+	if ruleEntry == nil {
+		return couldNotTest(base, "no defense-generation entry in upstream_inputs (need the rule)")
+	}
+	pc, err := dbxReader.ReadCandidate(ctx, ruleEntry.ResultRef)
+	if err != nil {
+		return couldNotTest(base, "could not read rule from Databricks "+ruleEntry.ResultRef.qualified()+
+			" where result_id="+ruleEntry.ResultRef.Key+": "+err.Error())
+	}
 	rule := strings.TrimSpace(pc.ArtifactContent)
 	cand := CandidateSpec{
 		Kind:   candidateKind(pc, rule),
@@ -85,11 +98,38 @@ func executeScenarioUpstream(ctx context.Context, req SubmitMitigationCheckReque
 	if cand.Kind == "firewall-rule" && req.ExecutionMode != execFirewall {
 		req.ExecutionMode = execFirewall
 	}
+	steps := []string{
+		"read " + cand.Kind + " from Databricks " + ruleEntry.ResultRef.qualified() +
+			" where result_id=" + ruleEntry.ResultRef.Key,
+	}
+
+	// Test: an inline test_basis wins; otherwise derive it from the check-generation
+	// entry's run_result via the standalone stimulus converter.
+	if len(req.TestBasis) == 0 {
+		if checkEntry := selectByCapability(entries, capCheckGeneration); checkEntry != nil {
+			runResult, err := dbxReader.ReadRunResult(ctx, checkEntry.ResultRef)
+			if err != nil {
+				return couldNotTest(base, "could not read run_result from Databricks "+checkEntry.ResultRef.qualified()+
+					" where result_id="+checkEntry.ResultRef.Key+": "+err.Error())
+			}
+			stim, err := parseStimulus(runResult)
+			if err != nil {
+				return couldNotTest(base, "check-generation run_result: "+err.Error())
+			}
+			tb, err := TestBasisFromStimulus(stim)
+			if err != nil {
+				return couldNotTest(base, "convert stimulus to test_basis: "+err.Error())
+			}
+			if b, e := json.Marshal(tb); e == nil {
+				req.TestBasis = b
+			}
+			steps = append(steps, "derived test_basis from check-generation run_result "+
+				checkEntry.ResultRef.qualified()+" where result_id="+checkEntry.ResultRef.Key)
+		}
+	}
 
 	out := executeScenario(ctx, req, runID, resultID)
-	out.Steps = append([]string{
-		"read " + cand.Kind + " from Databricks " + ref.qualified() + " where result_id=" + ref.Key,
-	}, out.Steps...)
+	out.Steps = append(steps, out.Steps...)
 	return out
 }
 
@@ -163,28 +203,31 @@ func lastQuoted(s string) (string, bool) {
 	return s[start+1 : end], true
 }
 
-// ruleRefFromUpstream returns the result_ref of the rule entry. Only the rule entry
-// is used for now: the first Databricks-backed entry (else the first entry).
-func ruleRefFromUpstream(raw json.RawMessage) (upstreamRef, error) {
+// parseUpstreamInputs decodes the upstream_inputs array.
+func parseUpstreamInputs(raw json.RawMessage) ([]upstreamInput, error) {
 	if len(raw) == 0 {
-		return upstreamRef{}, fmt.Errorf("no upstream_inputs provided")
+		return nil, fmt.Errorf("no upstream_inputs provided")
 	}
 	var entries []upstreamInput
 	if err := json.Unmarshal(raw, &entries); err != nil {
-		return upstreamRef{}, fmt.Errorf("not a valid array: %w", err)
+		return nil, fmt.Errorf("not a valid array: %w", err)
 	}
 	if len(entries) == 0 {
-		return upstreamRef{}, fmt.Errorf("array is empty")
+		return nil, fmt.Errorf("array is empty")
 	}
-	for _, e := range entries {
-		if strings.EqualFold(e.ResultRef.System, "databricks") && e.ResultRef.Key != "" {
-			return e.ResultRef, nil
+	return entries, nil
+}
+
+// selectByCapability returns the first entry with the given capability that has a
+// usable result_ref key, or nil.
+func selectByCapability(entries []upstreamInput, capability string) *upstreamInput {
+	for i := range entries {
+		if strings.EqualFold(strings.TrimSpace(entries[i].Capability), capability) &&
+			strings.TrimSpace(entries[i].ResultRef.Key) != "" {
+			return &entries[i]
 		}
 	}
-	if entries[0].ResultRef.Key == "" {
-		return upstreamRef{}, fmt.Errorf("first entry has no result_ref.key")
-	}
-	return entries[0].ResultRef, nil
+	return nil
 }
 
 // DatabricksReader reads upstream result_json rows from Databricks.
@@ -239,6 +282,46 @@ func (r *DatabricksReader) ReadCandidate(ctx context.Context, ref upstreamRef) (
 	log.Printf("databricks reader: READ OK (result_id=%s) in %s",
 		ref.Key, time.Since(start).Round(time.Millisecond))
 	return res.PrimaryCandidate, nil
+}
+
+// ReadRunResult reads result_json for ref.Key from the referenced table and returns
+// its run_result object — the standalone stimulus converter's input.
+func (r *DatabricksReader) ReadRunResult(ctx context.Context, ref upstreamRef) (json.RawMessage, error) {
+	if r == nil || r.db == nil {
+		return nil, fmt.Errorf("reader not configured")
+	}
+	q := "SELECT result_json FROM " + ref.qualified() + " WHERE result_id = ? LIMIT 1"
+	c, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	start := time.Now()
+
+	var js string
+	if err := r.db.QueryRowContext(c, q, ref.Key).Scan(&js); err != nil {
+		log.Printf("databricks reader: READ FAILED (result_id=%s) after %s: %v",
+			ref.Key, time.Since(start).Round(time.Millisecond), err)
+		return nil, err
+	}
+	rr, err := extractRunResult([]byte(js))
+	if err != nil {
+		return nil, err
+	}
+	log.Printf("databricks reader: READ OK run_result (result_id=%s) in %s",
+		ref.Key, time.Since(start).Round(time.Millisecond))
+	return rr, nil
+}
+
+// extractRunResult pulls the run_result object out of a result_json document.
+func extractRunResult(js []byte) (json.RawMessage, error) {
+	var res struct {
+		RunResult json.RawMessage `json:"run_result"`
+	}
+	if err := json.Unmarshal(js, &res); err != nil {
+		return nil, fmt.Errorf("result_json parse: %w", err)
+	}
+	if len(res.RunResult) == 0 || string(bytes.TrimSpace(res.RunResult)) == "null" {
+		return nil, fmt.Errorf("result_json.run_result is missing")
+	}
+	return res.RunResult, nil
 }
 
 func (r *DatabricksReader) Close() {
