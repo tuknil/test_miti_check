@@ -180,6 +180,48 @@ components:
           $ref: "#/components/schemas/CandidateSpec"
         test_basis:
           $ref: "#/components/schemas/TestBasisSpec"
+        upstream_inputs:
+          type: array
+          description: >
+            Upstream-mode input (env MC_INPUT_UPSTREAM). Each entry's result_ref
+            points at a Databricks row; the mitigation rule is read from the rule
+            entry's result_json.primary_candidate.artifact_content. The test still
+            comes from test_basis. In upstream mode contract_id may also be
+            "defense-generation@1.0" and the legacy reference ids are not required.
+          items:
+            $ref: "#/components/schemas/UpstreamInput"
+        primary_candidate:
+          type: object
+          description: >
+            Upstream defense-generation candidate; artifact_content carries the
+            ModSecurity rule. Accepted so a full defense-generation payload
+            validates. In upstream mode the rule is read from Databricks, not here.
+
+    UpstreamInput:
+      type: object
+      properties:
+        capability:
+          type: string
+          example: defense-generation
+        contract_id:
+          type: string
+          example: defense-generation@1.0
+        result_id:
+          type: string
+        result_ref:
+          type: object
+          properties:
+            system: { type: string, example: databricks }
+            catalog: { type: string, example: 36889_janus_dev }
+            schema: { type: string, example: defense_generation }
+            table: { type: string, example: defense_generation_results }
+            key:
+              type: string
+              example: "defense-generation-result:c3b02e61c65fb24b3fa16aaf"
+        evidence_refs:
+          type: array
+          items:
+            type: string
 
     SubstrateSpec:
       type: object

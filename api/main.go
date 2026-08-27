@@ -26,6 +26,10 @@ import (
 
 const contractID = "mitigation-check@1.0"
 
+// upstreamContractID is the contract of the incoming defense-generation payload
+// that now carries the mitigation rule (primary_candidate.artifact_content).
+const upstreamContractID = "defense-generation@1.0"
+
 //go:embed openapi.yaml
 var openapiSpec []byte
 
@@ -51,6 +55,31 @@ type SubmitMitigationCheckRequest struct {
 	ExecutionMode string `json:"execution_mode,omitempty"`
 	// CorrelationID is echoed into the result envelope (optional).
 	CorrelationID string `json:"correlation_id,omitempty"`
+
+	// --- Upstream defense-generation payload (new input contract) ---
+	// The mitigation rule is taken from primary_candidate.artifact_content. The
+	// remaining envelope fields are accepted (so a full defense-generation result
+	// validates) but not yet consumed; upstream_inputs will later carry the test.
+	PrimaryCandidateRaw json.RawMessage `json:"primary_candidate,omitempty"`
+	AttemptHistory      json.RawMessage `json:"attempt_history,omitempty"`
+	OutcomeReason       json.RawMessage `json:"outcome_reason,omitempty"`
+	ProofHandoffs       json.RawMessage `json:"proof_handoffs,omitempty"`
+	UpstreamInputs      json.RawMessage `json:"upstream_inputs,omitempty"`
+	UpstreamResultRef   json.RawMessage `json:"result_ref,omitempty"`
+	ProducedAt          string          `json:"produced_at,omitempty"`
+	UpstreamProse       string          `json:"prose_summary,omitempty"`
+	UpstreamResultID    string          `json:"result_id,omitempty"`
+	UpstreamTerminal    string          `json:"terminal_state,omitempty"`
+}
+
+// PrimaryCandidate is the upstream defense-generation candidate. artifact_content
+// carries the actual mitigation rule (a ModSecurity SecRule).
+type PrimaryCandidate struct {
+	ArtifactContent string `json:"artifact_content"`
+	ArtifactType    string `json:"artifact_type"`
+	CandidateID     string `json:"candidate_id"`
+	CandidateKind   string `json:"candidate_kind"`
+	Discriminator   string `json:"discriminator"`
 }
 
 // SubstrateSpec is the inline validation substrate — a bounded, non-production
@@ -111,6 +140,14 @@ type APIError struct {
 var store *RunStore
 var dbx *DatabricksSink
 
+// upstreamInputMode selects the separate upstream executor: the mitigation rule is
+// read from a Databricks table referenced by the request's upstream_inputs, instead
+// of the inline candidate. Toggled by env MC_INPUT_UPSTREAM (truthy).
+var upstreamInputMode bool
+
+// dbxReader reads upstream result_json rows from Databricks (upstream mode only).
+var dbxReader *DatabricksReader
+
 func main() {
 	// CLI mode used by the GitHub Actions workflow: run one scenario locally
 	// (docker on the runner) and print the RunOutcome JSON to stdout. No DB.
@@ -131,6 +168,13 @@ func main() {
 
 	// Optional secondary sink (Databricks Delta). nil when DATABRICKS_DSN is unset.
 	dbx = NewDatabricksSink()
+
+	// Separate upstream executor (rule read from Databricks) — toggled by env.
+	if v := strings.ToLower(strings.TrimSpace(os.Getenv("MC_INPUT_UPSTREAM"))); v == "1" || v == "true" || v == "yes" {
+		upstreamInputMode = true
+		dbxReader = NewDatabricksReader()
+		log.Printf("input contract: UPSTREAM mode (rule read from Databricks via upstream_inputs)")
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/mitigation-check-runs", withCORS(handleRunsCollection))
@@ -161,6 +205,7 @@ func main() {
 	err = srv.ListenAndServe()
 	store.Close() // synchronous: guarantees postgres stops cleanly before exit
 	dbx.Close()
+	dbxReader.Close()
 	if err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
@@ -321,7 +366,12 @@ func handleSubmitRun(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), budget)
 	defer cancel()
 
-	outcome := executeScenario(ctx, req, runID, resultID)
+	var outcome RunOutcome
+	if upstreamInputMode {
+		outcome = executeScenarioUpstream(ctx, req, runID, resultID)
+	} else {
+		outcome = executeScenario(ctx, req, runID, resultID)
+	}
 	enrichEnvelope(&outcome, req.CorrelationID)
 
 	// Secondary sink: write the result to the Databricks table synchronously so the
@@ -393,17 +443,25 @@ func decodeRequest(r *http.Request) (SubmitMitigationCheckRequest, json.RawMessa
 // and returns the names of every offending field.
 func validate(req SubmitMitigationCheckRequest) []string {
 	var bad []string
-	if req.ContractID != contractID {
+	// In upstream-input mode the rule is read from Databricks via upstream_inputs, so
+	// the legacy reference ids are not required and the upstream contract is accepted.
+	if req.ContractID != contractID && !(upstreamInputMode && req.ContractID == upstreamContractID) {
 		bad = append(bad, "contract_id")
 	}
-	if strings.TrimSpace(req.CandidateArtifactID) == "" {
-		bad = append(bad, "candidate_artifact_id")
-	}
-	if strings.TrimSpace(req.TestBasisID) == "" {
-		bad = append(bad, "test_basis_id")
-	}
-	if strings.TrimSpace(req.CheckProfileID) == "" {
-		bad = append(bad, "check_profile_id")
+	if upstreamInputMode {
+		if len(req.UpstreamInputs) == 0 {
+			bad = append(bad, "upstream_inputs")
+		}
+	} else {
+		if strings.TrimSpace(req.CandidateArtifactID) == "" {
+			bad = append(bad, "candidate_artifact_id")
+		}
+		if strings.TrimSpace(req.TestBasisID) == "" {
+			bad = append(bad, "test_basis_id")
+		}
+		if strings.TrimSpace(req.CheckProfileID) == "" {
+			bad = append(bad, "check_profile_id")
+		}
 	}
 	// substrate_selector is optional (LLD §10.1) — no constraint.
 

@@ -235,6 +235,29 @@ envelope, then **appends** the full verdict detail (`match`, `expected`, `actual
 
 For a local (non-Docker) API run, point `DATABASE_URL` at any reachable Postgres.
 
+### Input contract: rule read from Databricks (upstream mode)
+
+A **separate executor**, selected by the env condition variable
+**`MC_INPUT_UPSTREAM`** (truthy: `1`/`true`/`yes`), serves the same
+`POST /v1/mitigation-check-runs` endpoint with a different input contract. Instead
+of an inline `candidate` rule, the request carries **`upstream_inputs`** — each
+entry's `result_ref` points at a Databricks row — and the mitigation **rule is read
+from that row's `result_json.primary_candidate.artifact_content`**. The **test
+still comes explicitly** in `test_basis`, as before.
+
+- The rule entry's `result_ref` gives `{system:"databricks", catalog, schema,
+  table, key}`; the executor runs `SELECT result_json FROM catalog.schema.table
+  WHERE result_id = key` (using `DATABRICKS_DSN`) and extracts
+  `primary_candidate.artifact_content`.
+- `upstream_inputs` may hold two entries (rule + test); for now only the rule
+  entry is used and the test is taken from `test_basis`.
+- The resolved rule is fed to the shared executor, so bring-up / WAF / verdict are
+  identical to the default path. A read/parse failure yields `could-not-test`
+  (never a fabricated verdict).
+- When `MC_INPUT_UPSTREAM` is unset the default executor runs unchanged (inline
+  `candidate`). Both accept `contract_id: "mitigation-check@1.0"`; upstream mode
+  also accepts the upstream `"defense-generation@1.0"`.
+
 ## Run it — Docker (recommended)
 
 Both services run as containers via Docker Compose:
