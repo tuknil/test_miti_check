@@ -364,21 +364,36 @@ func compileRule(c CandidateSpec) (*wafRule, error) {
 	return r, nil
 }
 
-// extractRx pulls the regex out of the first quoted operator argument of a SecRule.
+// extractRx pulls the regex out of the first quoted operator argument of a
+// SecRule. ModSecurity quoted strings escape backslashes and quotes, so decode
+// exactly that serialization layer while preserving regex escapes such as \d.
 func extractRx(rule string) (string, bool) {
 	i := strings.Index(rule, `"`)
 	if i < 0 {
 		return "", false
 	}
-	rest := rule[i+1:]
-	j := strings.Index(rest, `"`)
-	if j < 0 {
-		return "", false
+
+	var quoted strings.Builder
+	for j := i + 1; j < len(rule); j++ {
+		switch rule[j] {
+		case '\\':
+			if j+1 < len(rule) && (rule[j+1] == '\\' || rule[j+1] == '"') {
+				quoted.WriteByte(rule[j+1])
+				j++
+				continue
+			}
+			quoted.WriteByte(rule[j])
+		case '"':
+			op := strings.TrimSpace(quoted.String())
+			if strings.HasPrefix(op, "@rx") {
+				return strings.TrimSpace(strings.TrimPrefix(op, "@rx")), true
+			}
+			return "", false
+		default:
+			quoted.WriteByte(rule[j])
+		}
 	}
-	op := strings.TrimSpace(rest[:j])
-	if strings.HasPrefix(op, "@rx") {
-		return strings.TrimSpace(strings.TrimPrefix(op, "@rx")), true
-	}
+
 	return "", false
 }
 
