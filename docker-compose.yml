@@ -8,7 +8,7 @@
 
 services:
   db:
-    image: postgres:16-alpine
+    image: artifact.it.att.com/astra-secure-container-catalog/postgresql:17.10-r1@sha256:c2ceffcba898b179fccfb526396f301a965fbd895d2b28e5484ed62789fac042
     container_name: mitigation-db
     environment:
       POSTGRES_USER: mc
@@ -31,28 +31,9 @@ services:
     container_name: mitigation-api
     environment:
       PORT: "8137"
+      GODEBUG: x509negativeserial=1
       DATABASE_URL: postgres://mc:mc@db:5432/mitigation?sslmode=disable
       MC_SUBSTRATE_NETWORK: mitigation-net
-      # Optional secondary sink: also write each result to a Databricks Delta table.
-      # DSN carries a token — set these in a local .env file, never here.
-      DATABRICKS_DSN: ${DATABRICKS_DSN:-}
-      DATABRICKS_CATALOG: ${DATABRICKS_CATALOG:-}
-      DATABRICKS_SCHEMA: ${DATABRICKS_SCHEMA:-}
-      DATABRICKS_TABLE: ${DATABRICKS_TABLE:-}
-      # Input contract: when truthy, use the separate upstream executor that reads
-      # the mitigation rule from Databricks via the request's upstream_inputs.
-      MC_INPUT_UPSTREAM: ${MC_INPUT_UPSTREAM:-}
-      # GitHub Actions execution mode (optional). Set in a local .env file.
-      GITHUB_REPO: tuknil/test_miti_check
-      GITHUB_USERNAME: tuknil
-      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
-      GITHUB_WORKFLOW: ${GITHUB_WORKFLOW:-mitigation-check.yml}
-      GITHUB_REF: ${GITHUB_REF:-main}
-      # Private source registry (for the github-ghcr relay pull) + optional TLS skip.
-      JFROG_REGISTRY: ${JFROG_REGISTRY:-}
-      JFROG_USER: ${JFROG_USER:-}
-      JFROG_TOKEN: ${JFROG_TOKEN:-}
-      MC_RELAY_INSECURE_TLS: ${MC_RELAY_INSECURE_TLS:-}
       # Azure ACI execution mode (optional).
       AZURE_SUBSCRIPTION_ID: ${AZURE_SUBSCRIPTION_ID:-}
       MC_ACI_RESOURCE_GROUP: ${MC_ACI_RESOURCE_GROUP:-}
@@ -61,8 +42,13 @@ services:
       AZURE_TENANT_ID: ${AZURE_TENANT_ID:-}
       AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:-}
       AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET:-}
-      # Skip TLS verification for Azure endpoints (corporate MITM proxy). INSECURE.
-      MC_AZURE_INSECURE_TLS: ${MC_AZURE_INSECURE_TLS:-}
+      JFROG_REGISTRY: ${JFROG_REGISTRY:-}
+      JFROG_USER: ${JFROG_USER:-}
+      JFROG_TOKEN: ${JFROG_TOKEN:-}
+      DATABRICKS_DSN: ${DATABRICKS_DSN:-}
+      DATABRICKS_CATALOG: ${DATABRICKS_CATALOG:-}
+      DATABRICKS_SCHEMA: ${DATABRICKS_SCHEMA:-}
+      DATABRICKS_TABLE: ${DATABRICKS_TABLE:-}
     ports:
       - "8137:8137"
     volumes:
@@ -79,7 +65,6 @@ services:
     image: mitigation-check-ui
     container_name: mitigation-ui
     environment:
-      # API endpoint the browser calls; injected into env.js at container start.
       API_BASE: ${API_BASE:-http://localhost:8137}
     ports:
       - "8082:80"
