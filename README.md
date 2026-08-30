@@ -49,6 +49,124 @@ returns `could-not-test` with a reason.
 > swapping in a real ModSecurity container is an adapter change behind the same
 > flow.
 
+### Execution mode: local Docker vs Azure ACI
+
+The substrate can be brought up two ways, selected by the **Execution mode**
+toggle in the UI (or `execution_mode` in the request: `local` | `aci`). Only the
+bring-up/teardown differs — the WAF, test, and verdict are identical.
+
+- **`local`** — `docker run` on the host daemon (`docker.sock`). What
+  Docker Compose uses.
+
+- **`inmemory`** (**default** when the request omits `execution_mode`) — runs the whole scenario **inside the API process**: the target
+  is an in-process HTTP stand-in (started on a loopback port), with the same
+  in-memory WAF in front. **No Docker socket, no external container, no cloud, no
+  network** — so it runs anywhere (including ACA) and completes in milliseconds.
+  Fidelity trade-off: the target is a stand-in, not the real CVE image, so it
+  validates the **rule logic**, not the real vulnerable binary (a weaker proof
+  than `local`/`aci`). Great for fast rule iteration and CI. Because the target is
+  a stand-in, the request may **omit `substrate` entirely** in this mode (the
+  result records `image: "(no substrate provided)"`); every other mode still
+  requires `substrate.image` and returns `could-not-test` without it.
+
+- **`firewall`** — a **separate in-memory evaluator** for **network firewall rules
+  (L3/L4)**, distinct from the L7 WAF path. No substrate/container: it parses the
+  candidate firewall rule and a supplied **network-connection** test (5-tuple) and
+  decides block/pass in-process. Fits Log4Shell as an **egress control** — a rule
+  that denies the outbound JNDI callback (LDAP/RMI) mitigates exploitation.
+
+  Two `candidate.rule` syntaxes are accepted (both evaluated in-memory against the
+  connection 5-tuple):
+  - **compact:** `<action> <proto> <src> -> <dst>[:<port|lo-hi|*>]`, e.g.
+    `deny tcp any -> any:1389`;
+  - **iptables** (set `engine: "iptables"` or use a rule with `-j`), e.g.
+    `-A OUTPUT -p tcp -m multiport --dports 389,636,1099,1389 -j DROP` — it parses
+    `-p`, `-s`, `-d` (IP/CIDR), `--dport` (single or `lo:hi`), `-m multiport
+    --dports`, and `-j DROP|REJECT|ACCEPT`.
+
+  The test is
+  `{ kind: "network-connection", connection: {protocol, src_ip, dst_ip, dst_port}, expected: {blocked} }`.
+  See `scenarios/05-firewall-egress-block.json` (compact TP),
+  `scenarios/06-firewall-egress-miss.json` (compact FN),
+  `scenarios/09-firewall-iptables-block.json` (iptables TP) and
+  `scenarios/10-firewall-iptables-miss.json` (iptables FN — rule too narrow).
+- **`aci`** — Azure Container Instances. For when the API is hosted on **Azure
+  Container Apps**, which can't mount a Docker socket or launch sibling
+  containers. The adapter creates a per-run ACI container group, runs the test
+  against it over the network, then deletes it (LLD §3.3, §6.4 pluggable
+  substrate adapter). It authenticates with `DefaultAzureCredential` (a managed
+  identity on ACA, or env/`az` locally) and needs:
+
+  ```
+  AZURE_SUBSCRIPTION_ID, MC_ACI_RESOURCE_GROUP, MC_ACI_REGION
+  ```
+
+  Optional: `MC_ACI_CPU`, `MC_ACI_MEMORY_GB`, and private-registry creds via
+  `MC_ACI_REGISTRY_*` (falls back to `JFROG_*`). When Azure isn't configured, an
+  `aci` run returns `could-not-test` with that reason rather than failing — so
+  the mode is selectable everywhere; real execution needs Azure.
+
+- **`aci-sp`** — same ACI substrate, but authenticated with an explicit **service
+  principal** instead of a managed identity. Portable: works from a **laptop** or
+  on **ACA** with the same env vars. In addition to the three `AZURE_*`/`MC_ACI_*`
+  values above, set:
+
+  ```
+  AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET
+  ```
+
+  (The `aci` mode also accepts these via `DefaultAzureCredential`; `aci-sp` just
+  makes the service-principal path explicit and required.)
+
+- **`github`** — runs the scenario on a **GitHub Actions** runner. On submit the
+  API dispatches a `workflow_dispatch` in the configured repo (passing the run id
+  + the scenario as inputs), waits for the run to complete, downloads the result
+  artifact, and stores it — so the ledger row is identical to a local run. The
+  workflow (`.github/workflows/mitigation-check.yml`) runs **this same executor**
+  via the `run-scenario` CLI, so the logic is shared, not reimplemented. Config
+  (via docker compose `.env`):
+
+  ```
+  GITHUB_REPO=owner/repo        # repo that holds the workflow (on its default branch)
+  GITHUB_USERNAME=<user>        # informational
+  GITHUB_TOKEN=<PAT>            # actions:write on that repo
+  GITHUB_WORKFLOW=mitigation-check.yml   # optional (default)
+  GITHUB_REF=main                        # optional (default)
+  ```
+
+  The workflow must exist on the repo's **default branch** for the dispatch API
+  to find it. When GitHub isn't configured a `github` run returns
+  `could-not-test`.
+
+- **`github-ghcr`** — a **separate** GitHub mode (does not modify `github`) that
+  **relays the substrate image through the repo's GHCR** first, so the runner
+  needs no access to the source registry (useful when the source is a private
+  Artifactory the runner can't reach). On submit the API:
+  1. sets a repo Actions secret `GHCR_PAT` (libsodium sealed box) so the runner
+     can pull the private relayed image — there is no API to change package
+     visibility, so it grants the runner a read token instead;
+  2. pulls the source image locally, retags it `ghcr.io/<owner>/<name>`, and
+     pushes it (host-daemon push);
+  3. dispatches `.github/workflows/mitigation-check-ghcr.yml`, which logs in to
+     GHCR with `GHCR_PAT` and runs the scenario against the relayed image.
+
+  The relay is **daemonless** (a pure-Go registry-to-registry copy via
+  go-containerregistry) — **no local Docker / docker.sock**, so it runs on Azure
+  Container Apps. It needs egress to both registries and a token with
+  **`write:packages`** (push); the workflow uses the stored token for
+  `read:packages` (pull). A private source registry is authenticated from
+  `MC_ACI_REGISTRY_*` / `JFROG_*` env. The relayed package stays **private**.
+
+### Which modes run on Azure Container Apps (no docker.sock)
+
+| Mode | Runs on ACA? | Why |
+|---|---|---|
+| `inmemory` | ✅ | in-process |
+| `aci` / `aci-sp` | ✅ | Azure API, no local Docker |
+| `github` | ✅ | just dispatches over HTTP; substrate runs on the runner |
+| `github-ghcr` | ✅ | daemonless relay + HTTP dispatch |
+| `local` | ❌ | needs the host Docker socket (local dev only) |
+
 ## Step 3 — Run ledger
 
 Every submitted run is recorded in an in-memory ledger (LLD §11.1), keeping the
@@ -61,23 +179,102 @@ Every submitted run is recorded in an in-memory ledger (LLD §11.1), keeping the
 The UI shows a left **Runs** panel; clicking a run opens its immutable request
 (marked immutable) and rendered result on the right.
 
-**Persistence — embedded PostgreSQL.** The ledger is stored in a PostgreSQL
-instance the API manages in-process (`fergusstrange/embedded-postgres`). The
-immutable request and the executed response are `JSONB` columns of
-`mitigation_check_run`. The Postgres data cluster (and cached binaries) live
-under `MC_DATA_DIR` — a mounted volume in Docker — so runs are **durable across
-`docker stop` and `docker rm`**: recreate the container and Postgres reuses the
-existing cluster.
+**Persistence — PostgreSQL container.** The ledger is stored in a `db` Postgres
+service (`postgres:16-alpine`) defined in `docker-compose.yml`. The immutable
+request and the executed response are `JSONB` columns of `mitigation_check_run`.
+The API connects via `DATABASE_URL` (default `postgres://mc:mc@db:5432/mitigation`)
+and waits for the db healthcheck before serving.
 
-Notes on the container:
+The db data lives on the named volume `pgdata` (`/var/lib/postgresql/data`), so
+runs are **durable across `docker stop` and `docker rm` of the db container** —
+recreate it and the data is intact; the API's connection pool reconnects
+automatically. Only `docker compose down -v` deletes the volume.
 
-- The runtime image is Debian (not Alpine) because the embedded Postgres
-  binaries are glibc-linked.
-- Postgres refuses to run as root, so the container starts as root only long
-  enough to make the mounted docker socket reachable, then drops to a non-root
-  `app` user (see `api/entrypoint.sh`) under which both the API and Postgres run.
-- On first start the Postgres binaries are downloaded once and cached on the
-  volume, so container recreation does not re-download them.
+**Optional secondary sink — Databricks.** Besides Postgres, each result is also
+written to a Databricks Delta table. The `result_id` column stores the run's full
+`result_id` value (`mitigation-check-result:<hex>`), and the
+[result envelope](#result-envelope)'s `result_ref.key` reports that same value, so
+a consumer can `SELECT … WHERE result_id = '<value>'`. The write is **synchronous** so the envelope's
+`status` reflects it — a failure never changes `terminal_state` (still the test
+result) or fails the run, but degrades `status` to `storage-failed`. Disabled
+unless `DATABRICKS_DSN` is set. Config (put the DSN, which carries a token, in
+`.env` — never in `docker-compose.yml`):
+
+```
+DATABRICKS_DSN=token:<PAT>@<host>/sql/1.0/warehouses/<id>
+DATABRICKS_CATALOG=...
+DATABRICKS_SCHEMA=...
+DATABRICKS_TABLE=mitigation_check
+```
+
+Target table:
+`mitigation_check(run_id string, result_id string, result_json STRING, primary key(run_id, result_id))`.
+The host must be reachable from the API and the workspace's IP access list must
+allow it (a `403 "Unauthorized network access"` means the API's egress IP isn't
+allowlisted — the run still returns, with `status: "storage-failed"`).
+
+### Result envelope
+
+Every run response (and the stored ledger/`GET` record) leads with a compact
+envelope, then **appends** the full verdict detail (`match`, `expected`, `actual`,
+`substrate`, the resolved `candidate` rule and `test_basis`, `steps`, …). The
+`candidate` and `test_basis` are embedded so a `mitigation_check` row is
+self-contained — a downstream consumer reads the rule and test from that row and
+need not query the upstream table the rule was sourced from:
+
+```json
+{
+  "capability": "mitigation-check",
+  "contract_id": "mitigation-check@1.0",
+  "run_id": "mc-run-…",
+  "result_id": "mitigation-check-result:1c40b2497a6f766452572f2c",
+  "terminal_state": "blocked",
+  "status": "completed",
+  "correlation_id": "mc-request:CVE-2021-44228:waf:1",
+  "result_ref": {
+    "system": "databricks", "catalog": "…", "schema": "…", "table": "mitigation_check",
+    "key": "mitigation-check-result:1c40b2497a6f766452572f2c"
+  },
+  "evidence_refs": []
+}
+```
+
+- `terminal_state` — the test result (`blocked` / `not-blocked` / `could-not-test`
+  / `scope-declined` / `malfunction`).
+- `status` — workflow status: `completed`; `storage-failed` if the Databricks
+  write failed; `failed` if the run malfunctioned.
+- `correlation_id` — echoed from the request when supplied (optional).
+- `result_ref` — points at the Databricks row for this result. `key` is the
+  `result_id` value itself (the same string in the top-level `result_id` and in
+  the table's `result_id` column), so a consumer can
+  `SELECT … WHERE result_id = '<key>'`.
+
+For a local (non-Docker) API run, point `DATABASE_URL` at any reachable Postgres.
+
+### Input contract: rule read from Databricks (upstream mode)
+
+A **separate executor**, **on by default** (set env **`MC_INPUT_UPSTREAM`** to
+`0`/`false`/`no` to fall back to the legacy inline-`candidate` executor), serves the same
+`POST /v1/mitigation-check-runs` endpoint with a different input contract. Instead
+of inline artifacts the request carries **`upstream_inputs`** — each entry's
+`result_ref` points at a Databricks row — and entries are selected **by
+`capability`**:
+
+- **`defense-generation`** → the mitigation **rule**: `SELECT result_json FROM
+  catalog.schema.table WHERE result_id = key` (using `DATABRICKS_DSN`) and extract
+  `primary_candidate.artifact_content` (kind/engine/action derived from it).
+- **`check-generation`** → the **test**: read the same way, then take
+  `result_json.run_result` and feed it to the standalone stimulus converter
+  (`parseStimulus` → `TestBasisFromStimulus`) to build the `test_basis`.
+
+Precedence for the test: an **inline `test_basis` in the request wins**; otherwise
+it is derived from the `check-generation` entry. The resolved rule/test are fed to
+the shared executor, so bring-up / WAF / verdict are identical to the default path.
+A read/parse failure yields `could-not-test` (never a fabricated verdict); a
+missing `defense-generation` entry is `could-not-test` (no rule).
+- Upstream mode is the default; set `MC_INPUT_UPSTREAM=0` to run the legacy
+  executor (inline `candidate`). Both accept `contract_id: "mitigation-check@1.0"`;
+  upstream mode also accepts the upstream `"defense-generation@1.0"`.
 
 ## Run it — Docker (recommended)
 
@@ -90,6 +287,11 @@ docker compose up -d --build
 - UI → http://localhost:8082
 - API → http://localhost:8137
 - API docs (Swagger UI) → http://localhost:8137/docs · spec at http://localhost:8137/openapi.yaml
+
+The UI's API endpoint is **not hardcoded** — it's injected at container start from the
+`API_BASE` env var (default `http://localhost:8137`). The nginx entrypoint renders
+`env.js` (`window.MC_API_BASE`) via `envsubst`, and the UI reads it (the field stays
+editable for manual override). For ACA, set `API_BASE` to the API app's public FQDN.
 
 Then stop with `docker compose down` (keep `-v` off to preserve the ledger).
 

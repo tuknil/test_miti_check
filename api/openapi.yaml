@@ -152,12 +152,76 @@ components:
         substrate_selector:
           type: string
           description: Logical bounded, non-production substrate (optional).
+        execution_mode:
+          type: string
+          enum: [local, inmemory, firewall, aci, aci-sp, github, github-ghcr]
+          default: inmemory
+          description: >
+            Substrate adapter (defaults to "inmemory" when omitted).
+            "local" runs the target on the host Docker daemon;
+            "inmemory" runs an in-process stand-in target inside the API (no Docker/cloud);
+            "firewall" evaluates an L3/L4 firewall rule against a network-connection
+            test in-process (no substrate);
+            "aci" runs it as an Azure Container Instance via DefaultAzureCredential;
+            "aci-sp" is ACI authenticated with a service principal (env vars);
+            "github" dispatches a GitHub Actions workflow that runs the scenario
+            and returns the result;
+            "github-ghcr" is like github but the API first relays the substrate
+            image into the repo's GHCR so the runner needs no source-registry access.
+        correlation_id:
+          type: string
+          description: >
+            Optional caller correlation id, echoed into the result envelope's
+            correlation_id (omitted from the response when not supplied).
+          example: "mc-request:CVE-2021-44228:waf:1"
         substrate:
           $ref: "#/components/schemas/SubstrateSpec"
         candidate:
           $ref: "#/components/schemas/CandidateSpec"
         test_basis:
           $ref: "#/components/schemas/TestBasisSpec"
+        upstream_inputs:
+          type: array
+          description: >
+            Upstream-mode input (env MC_INPUT_UPSTREAM). Each entry's result_ref
+            points at a Databricks row; the mitigation rule is read from the rule
+            entry's result_json.primary_candidate.artifact_content. The test still
+            comes from test_basis. In upstream mode contract_id may also be
+            "defense-generation@1.0" and the legacy reference ids are not required.
+          items:
+            $ref: "#/components/schemas/UpstreamInput"
+        primary_candidate:
+          type: object
+          description: >
+            Upstream defense-generation candidate; artifact_content carries the
+            ModSecurity rule. Accepted so a full defense-generation payload
+            validates. In upstream mode the rule is read from Databricks, not here.
+
+    UpstreamInput:
+      type: object
+      properties:
+        capability:
+          type: string
+          example: defense-generation
+        contract_id:
+          type: string
+          example: defense-generation@1.0
+        result_id:
+          type: string
+        result_ref:
+          type: object
+          properties:
+            system: { type: string, example: databricks }
+            catalog: { type: string, example: 36889_janus_dev }
+            schema: { type: string, example: defense_generation }
+            table: { type: string, example: defense_generation_results }
+            key:
+              type: string
+              example: "defense-generation-result:c3b02e61c65fb24b3fa16aaf"
+        evidence_refs:
+          type: array
+          items:
+            type: string
 
     SubstrateSpec:
       type: object
@@ -245,14 +309,40 @@ components:
 
     RunOutcome:
       type: object
+      description: >
+        Result envelope (capability .. evidence_refs) with the full verdict detail
+        appended (match .. limitations).
       properties:
+        capability:
+          type: string
+          enum: ["mitigation-check"]
+        contract_id:
+          type: string
+          enum: ["mitigation-check@1.0"]
         run_id:
           type: string
         result_id:
           type: string
         terminal_state:
           type: string
-          enum: [blocked, not-blocked, could-not-test, malfunction]
+          enum: [blocked, not-blocked, could-not-test, scope-declined, malfunction]
+          description: The test result.
+        status:
+          type: string
+          enum: [completed, storage-failed, failed]
+          description: >
+            Workflow status. "completed" on success; "storage-failed" when the
+            Databricks write failed (terminal_state is still the test result);
+            "failed" when the run malfunctioned.
+        correlation_id:
+          type: string
+          description: Echoed from the request; omitted when not supplied.
+        result_ref:
+          $ref: "#/components/schemas/ResultRef"
+        evidence_refs:
+          type: array
+          items:
+            type: string
         match:
           type: boolean
           description: Whether actual.blocked equals expected.blocked.
@@ -262,6 +352,16 @@ components:
           $ref: "#/components/schemas/ActualOutcome"
         substrate:
           $ref: "#/components/schemas/SubstrateInfo"
+        candidate:
+          allOf:
+            - $ref: "#/components/schemas/CandidateSpec"
+          description: >
+            The actual mitigation rule that was run (embedded so a mitigation_check
+            row is self-contained; consumers need not query the upstream table).
+        test_basis:
+          allOf:
+            - $ref: "#/components/schemas/TestBasisSpec"
+          description: The actual test that was run (embedded, same rationale).
         steps:
           type: array
           items:
@@ -272,6 +372,29 @@ components:
           type: array
           items:
             type: string
+
+    ResultRef:
+      type: object
+      description: >
+        Pointer to where the full result row is stored so another service can
+        query it.
+      properties:
+        system:
+          type: string
+          example: databricks
+        catalog:
+          type: string
+        schema:
+          type: string
+        table:
+          type: string
+          example: mitigation_check
+        key:
+          type: string
+          description: >
+            The result_id value itself — the same string in the top-level result_id
+            and in the table's result_id column. Query WHERE result_id = <key>.
+          example: "mitigation-check-result:1c40b2497a6f766452572f2c"
 
     Outcome:
       type: object
@@ -302,10 +425,16 @@ components:
       properties:
         image:
           type: string
+        runner:
+          type: string
+          enum: [local, inmemory, firewall, aci, aci-sp, github, github-ghcr]
         container_id:
           type: string
         host_port:
           type: integer
+        fqdn:
+          type: string
+          description: ACI public FQDN (aci runner only).
         ready:
           type: boolean
 

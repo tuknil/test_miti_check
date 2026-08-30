@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>mitigation-check · Runs</title>
-  <link rel="stylesheet" href="styles.css?v=5" />
+  <link rel="stylesheet" href="styles.css?v=13" />
 </head>
 <body>
   <div class="app">
@@ -31,8 +31,21 @@
           </label>
           <label class="field">
             <span class="field-label">API base URL</span>
-            <input id="api-base" value="http://localhost:8137" />
+            <input id="api-base" placeholder="http://localhost:8137" />
           </label>
+          <div class="field">
+            <span class="field-label">Execution mode</span>
+            <div class="toggle" id="exec-toggle" role="tablist">
+              <button type="button" class="toggle-opt active" data-mode="local">Local Docker</button>
+              <button type="button" class="toggle-opt" data-mode="inmemory">In-memory</button>
+              <button type="button" class="toggle-opt" data-mode="firewall">Firewall (in-memory)</button>
+              <button type="button" class="toggle-opt" data-mode="aci">Azure ACI</button>
+              <button type="button" class="toggle-opt" data-mode="aci-sp">Azure ACI (SP)</button>
+              <button type="button" class="toggle-opt" data-mode="github">GitHub Actions</button>
+              <button type="button" class="toggle-opt" data-mode="github-ghcr">GitHub (GHCR relay)</button>
+            </div>
+            <span class="field-note" id="exec-note">Runs the substrate on the host Docker daemon.</span>
+          </div>
           <button type="submit" id="submit-btn">Submit run · POST</button>
         </form>
         <div id="composer-status" class="response idle">
@@ -44,6 +57,7 @@
     </main>
   </div>
 
-  <script src="app.js?v=5"></script>
+  <script src="env.js"></script>
+  <script src="app.js?v=13"></script>
 </body>
 </html>

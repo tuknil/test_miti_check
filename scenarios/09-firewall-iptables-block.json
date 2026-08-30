@@ -1,0 +1,28 @@
+{
+  "contract_id": "mitigation-check@1.0",
+  "candidate_artifact_id": "candidate:log4shell:egress-iptables:block-jndi",
+  "test_basis_id": "test-basis:log4shell:jndi-callback:1389",
+  "check_profile_id": "mitigation-check-profile:firewall-egress:1",
+  "execution_mode": "firewall",
+  "candidate": {
+    "kind": "firewall-rule",
+    "engine": "iptables",
+    "rule_id": "IPT-EGRESS-1001",
+    "action": "deny",
+    "rule": "-A OUTPUT -p tcp -m multiport --dports 389,636,1099,1389 -j DROP"
+  },
+  "test_basis": {
+    "kind": "network-connection",
+    "proof_basis": "verified-vuln-artifact",
+    "connection": {
+      "protocol": "tcp",
+      "src_ip": "10.0.0.5",
+      "dst_ip": "198.51.100.7",
+      "dst_port": 1389
+    },
+    "expected": {
+      "classification": "true-positive",
+      "blocked": true
+    }
+  }
+}

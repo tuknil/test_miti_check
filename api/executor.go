@@ -31,19 +31,49 @@ import (
 )
 
 // RunOutcome is the executed result surfaced to the UI (a pragmatic superset of
-// MitigationCheckResult@1, LLD §10.2).
+// MitigationCheckResult@1, LLD §10.2). The leading fields are the result envelope;
+// the trailing fields are the full verdict detail (appended, not replaced).
 type RunOutcome struct {
-	RunID         string   `json:"run_id"`
-	ResultID      string   `json:"result_id"`
-	TerminalState string   `json:"terminal_state"`
-	Match         bool     `json:"match"`
-	Expected      Expected `json:"expected"`
-	Actual        Actual   `json:"actual"`
-	Substrate     SubInfo  `json:"substrate"`
-	Steps         []string `json:"steps"`
-	ProseSummary  string   `json:"prose_summary"`
-	Limitations   []string `json:"limitations,omitempty"`
+	Capability    string     `json:"capability"`
+	ContractID    string     `json:"contract_id"`
+	RunID         string     `json:"run_id"`
+	ResultID      string     `json:"result_id"`
+	TerminalState string     `json:"terminal_state"`
+	Status        string     `json:"status"`
+	CorrelationID string     `json:"correlation_id,omitempty"`
+	ResultRef     *ResultRef `json:"result_ref,omitempty"`
+	EvidenceRefs  []string   `json:"evidence_refs"`
+
+	Match     bool     `json:"match"`
+	Expected  Expected `json:"expected"`
+	Actual    Actual   `json:"actual"`
+	Substrate SubInfo  `json:"substrate"`
+	// Candidate and TestBasis carry the actual mitigation rule and the test that
+	// were run, so a mitigation_check row is self-contained — downstream consumers
+	// need not query the upstream tables the rule/test were sourced from.
+	Candidate    *CandidateSpec `json:"candidate,omitempty"`
+	TestBasis    *TestBasisSpec `json:"test_basis,omitempty"`
+	Steps        []string       `json:"steps"`
+	ProseSummary string         `json:"prose_summary"`
+	Limitations  []string       `json:"limitations,omitempty"`
 }
+
+// ResultRef points at where the full result row is stored so another service can
+// query it. key is the result_id value itself — the same string written to the
+// table's result_id column and reported as the top-level result_id — so the
+// consumer queries WHERE result_id = <key>.
+type ResultRef struct {
+	System  string `json:"system"`
+	Catalog string `json:"catalog"`
+	Schema  string `json:"schema"`
+	Table   string `json:"table"`
+	Key     string `json:"key"`
+}
+
+// resultIDPrefix is the prefix on the run's result_id (so result_id looks like
+// "mitigation-check-result:<hex>"). The full result_id — prefix included — is what
+// is written to the Databricks result_id column and placed in result_ref.key.
+const resultIDPrefix = "mitigation-check-result:"
 
 type Expected struct {
 	Classification string `json:"classification"`
@@ -61,8 +91,10 @@ type Actual struct {
 
 type SubInfo struct {
 	Image       string `json:"image"`
+	Runner      string `json:"runner,omitempty"` // "local" | "aci"
 	ContainerID string `json:"container_id,omitempty"`
 	HostPort    int    `json:"host_port,omitempty"`
+	FQDN        string `json:"fqdn,omitempty"` // ACI public FQDN
 	Ready       bool   `json:"ready"`
 }
 
@@ -73,16 +105,59 @@ const (
 	stateMalfunction  = "malfunction"
 )
 
+// Execution modes select which substrate adapter brings up the target.
+const (
+	execLocal      = "local"       // docker on the host daemon (docker.sock)
+	execInMemory   = "inmemory"    // in-process target inside the API; no external deps
+	execACI        = "aci"         // Azure Container Instances via DefaultAzureCredential
+	execACISP      = "aci-sp"      // Azure Container Instances via a service principal (env)
+	execGitHub     = "github"      // dispatch a GitHub Actions workflow that runs the scenario
+	execGitHubGHCR = "github-ghcr" // github, but relay the image through the repo's GHCR
+	execFirewall   = "firewall"    // in-memory L3/L4 firewall-rule evaluation (no substrate)
+)
+
+// substrate is a brought-up validation target ready to receive test traffic.
+type substrate struct {
+	base    string // http base URL of the target, e.g. http://host:8080
+	cleanup func() // teardown (idempotent)
+}
+
+// substrateRunner brings up the target for one run. A non-empty reason means it
+// could not be brought up (→ could-not-test); base/cleanup are then unused.
+type substrateRunner func(ctx context.Context, out *RunOutcome, sub SubstrateSpec, runID string) (*substrate, string)
+
 // executeScenario runs the full bring-up → apply → test → observe → teardown loop.
 // It requires the inline substrate/candidate/test_basis bodies to be present.
 func executeScenario(ctx context.Context, req SubmitMitigationCheckRequest, runID, resultID string) RunOutcome {
 	out := RunOutcome{RunID: runID, ResultID: resultID}
 
+	mode := req.ExecutionMode
+	if mode == "" {
+		mode = execInMemory // default when the request omits execution_mode
+	}
+	out.Substrate.Runner = mode
+	out.Steps = append(out.Steps, "execution mode: "+mode)
+
+	// Firewall mode is a separate in-memory evaluator: a firewall-rule candidate
+	// vs a network-connection test — no substrate, WAF, or container.
+	if mode == execFirewall {
+		return runFirewallInMemory(ctx, req, out)
+	}
+
 	var sub SubstrateSpec
 	var cand CandidateSpec
 	var test TestBasisSpec
-	if err := json.Unmarshal(nonNil(req.Substrate), &sub); err != nil || sub.Image == "" {
-		return couldNotTest(out, "substrate image not provided in request body")
+	if err := json.Unmarshal(nonNil(req.Substrate), &sub); err != nil {
+		sub = SubstrateSpec{} // tolerate absent/garbled substrate; enforced per-mode below
+	}
+	if sub.Image == "" {
+		// In-memory mode needs no real substrate image — the target is an in-process
+		// stand-in — so a request may omit substrate entirely. Other modes bring up a
+		// real container and must be told which image.
+		if mode != execInMemory {
+			return couldNotTest(out, "substrate image not provided in request body")
+		}
+		sub.Image = "(no substrate provided)"
 	}
 	if err := json.Unmarshal(nonNil(req.Candidate), &cand); err != nil || cand.Rule == "" {
 		return couldNotTest(out, "candidate WAF rule not provided in request body")
@@ -97,6 +172,19 @@ func executeScenario(ctx context.Context, req SubmitMitigationCheckRequest, runI
 		StatusCode:     test.Expected.StatusCode,
 	}
 	out.Substrate.Image = sub.Image
+	// Embed the resolved rule and test so the result is self-contained.
+	out.Candidate = &cand
+	out.TestBasis = &test
+
+	// GitHub mode delegates the entire scenario to a GitHub Actions runner, which
+	// runs this same executor (local mode) and returns the result — so bring-up,
+	// WAF, and verdict all happen remotely.
+	if mode == execGitHub {
+		return runViaGitHub(ctx, req, out)
+	}
+	if mode == execGitHubGHCR {
+		return runViaGitHubGHCR(ctx, req, out)
+	}
 
 	// Compile the candidate rule up front; a rule we cannot parse means we cannot
 	// faithfully apply the candidate, so we cannot test.
@@ -104,47 +192,39 @@ func executeScenario(ctx context.Context, req SubmitMitigationCheckRequest, runI
 	if err != nil {
 		return couldNotTest(out, "could not parse candidate SecRule: "+err.Error())
 	}
+	if cand.RuleID == "" {
+		cand.RuleID = waf.ruleID // reflected in out.Candidate (same value)
+	}
 	out.Steps = append(out.Steps, "parsed candidate SecRule id="+waf.ruleID+" (deny→"+strconv.Itoa(waf.status)+")")
-
-	// 1. Bring up the substrate container.
-	if err := dockerAvailable(ctx); err != nil {
-		return couldNotTest(out, "docker not available: "+err.Error())
+	if waf.clamped {
+		out.Limitations = append(out.Limitations,
+			"a PCRE quantifier bound >1000 was clamped to 1000 to compile under RE2; matching differs only for inputs longer than ~1000 chars around the match")
 	}
-	out.Steps = append(out.Steps, "docker available")
 
-	// Two connection modes:
-	//  - network mode (containerized): attach the substrate to a shared docker
-	//    network (MC_SUBSTRATE_NETWORK) and reach it by container name:8080.
-	//  - local mode: publish the substrate on 127.0.0.1:<free-port>.
-	network := os.Getenv("MC_SUBSTRATE_NETWORK")
-	var cid, base string
-	if network != "" {
-		name := runID // unique per submit → safe container name on the network
-		cid, err = startContainerNet(ctx, sub.Image, name, network)
-		if err != nil {
-			return couldNotTest(out, "could not start substrate container: "+trimErr(err))
-		}
-		base = "http://" + name + ":8080"
-		out.Substrate.HostPort = 8080
-		out.Steps = append(out.Steps, "started container "+shortID(cid)+" from "+sub.Image+" on network "+network+" as "+name+":8080")
-	} else {
-		var port int
-		port, err = freePort()
-		if err != nil {
-			return couldNotTest(out, "no free host port for substrate")
-		}
-		out.Substrate.HostPort = port
-		cid, err = startContainer(ctx, sub.Image, port)
-		if err != nil {
-			return couldNotTest(out, "could not start substrate container: "+trimErr(err))
-		}
-		base = fmt.Sprintf("http://127.0.0.1:%d", port)
-		out.Steps = append(out.Steps, "started container "+shortID(cid)+" from "+sub.Image+" on 127.0.0.1:"+strconv.Itoa(port))
+	// 1. Bring up the substrate via the selected adapter. The rest of the flow
+	// (apply WAF, run test, verdict) is identical regardless of where it runs.
+	var runner substrateRunner
+	switch mode {
+	case execLocal:
+		runner = bringUpLocalSubstrate
+	case execInMemory:
+		runner = bringUpInMemorySubstrate
+	case execACI:
+		runner = bringUpACISubstrate
+	case execACISP:
+		runner = bringUpACISPSubstrate
+	default:
+		return couldNotTest(out, "unknown execution_mode: "+mode+" (use 'local' or 'aci')")
 	}
-	out.Substrate.ContainerID = shortID(cid)
-	defer func() { _ = stopContainer(cid) }()
 
-	if err := waitReady(ctx, base, 90*time.Second); err != nil {
+	sb, reason := runner(ctx, &out, sub, runID)
+	if reason != "" {
+		return couldNotTest(out, reason)
+	}
+	defer sb.cleanup()
+	base := sb.base
+
+	if err := waitReady(ctx, base, 120*time.Second); err != nil {
 		return couldNotTest(out, "substrate did not become ready: "+err.Error())
 	}
 	out.Substrate.Ready = true
@@ -216,9 +296,10 @@ func summarize(o RunOutcome) string {
 // ---- WAF: faithful enforcement of the specific candidate SecRule ----
 
 type wafRule struct {
-	ruleID string
-	status int
-	re     *regexp.Regexp
+	ruleID  string
+	status  int
+	re      *regexp.Regexp
+	clamped bool // a PCRE quantifier bound >1000 was clamped to fit RE2
 	// targets left implicit: URI + header values + body (covers
 	// REQUEST_URI | REQUEST_HEADERS | ARGS | REQUEST_BODY).
 }
@@ -226,18 +307,52 @@ type wafRule struct {
 var (
 	reRuleID = regexp.MustCompile(`\bid:(\d+)`)
 	reStatus = regexp.MustCompile(`\bstatus:(\d+)`)
+	// reQuant matches a bounded quantifier: {n}, {n,}, or {n,m}.
+	reQuant = regexp.MustCompile(`\{(\d+)(,(\d*))?\}`)
 )
+
+// re2MaxRepeat is Go's RE2 hard limit on quantifier counts (regexp/syntax).
+const re2MaxRepeat = 1000
+
+// clampRE2Repeats caps quantifier bounds above RE2's max (1000) so PCRE-style
+// anti-DoS bounds like `.{0,1024}` — which RE2 rejects — compile under Go's
+// regexp. RE2 has no backtracking, so the bound is only a length guard; clamping
+// it 1024→1000 changes matching only for inputs longer than ~1000 chars around the
+// match. Returns whether anything was clamped.
+func clampRE2Repeats(pat string) (string, bool) {
+	changed := false
+	out := reQuant.ReplaceAllStringFunc(pat, func(m string) string {
+		g := reQuant.FindStringSubmatch(m)
+		lo, _ := strconv.Atoi(g[1])
+		if lo > re2MaxRepeat {
+			lo, changed = re2MaxRepeat, true
+		}
+		if g[2] == "" { // {n}
+			return fmt.Sprintf("{%d}", lo)
+		}
+		if g[3] == "" { // {n,}
+			return fmt.Sprintf("{%d,}", lo)
+		}
+		hi, _ := strconv.Atoi(g[3]) // {n,m}
+		if hi > re2MaxRepeat {
+			hi, changed = re2MaxRepeat, true
+		}
+		return fmt.Sprintf("{%d,%d}", lo, hi)
+	})
+	return out, changed
+}
 
 func compileRule(c CandidateSpec) (*wafRule, error) {
 	pattern, ok := extractRx(c.Rule)
 	if !ok {
 		return nil, fmt.Errorf("no @rx operator found")
 	}
+	pattern, clamped := clampRE2Repeats(pattern)
 	re, err := regexp.Compile(pattern)
 	if err != nil {
 		return nil, err
 	}
-	r := &wafRule{re: re, ruleID: c.RuleID, status: 403}
+	r := &wafRule{re: re, ruleID: c.RuleID, status: 403, clamped: clamped}
 	if m := reRuleID.FindStringSubmatch(c.Rule); m != nil && r.ruleID == "" {
 		r.ruleID = m[1]
 	}
@@ -292,6 +407,46 @@ func urlDecode(s string) string {
 }
 
 // ---- Docker substrate lifecycle ----
+
+// bringUpLocalSubstrate runs the substrate on the host Docker daemon (docker.sock).
+//   - network mode (containerized API): attach to a shared docker network
+//     (MC_SUBSTRATE_NETWORK) and reach it by container name:8080.
+//   - local mode: publish on 127.0.0.1:<free-port>.
+func bringUpLocalSubstrate(ctx context.Context, out *RunOutcome, sub SubstrateSpec, runID string) (*substrate, string) {
+	if err := dockerAvailable(ctx); err != nil {
+		return nil, "docker not available: " + err.Error()
+	}
+	out.Steps = append(out.Steps, "docker available")
+
+	network := os.Getenv("MC_SUBSTRATE_NETWORK")
+	var cid, base string
+	if network != "" {
+		name := runID // unique per submit → safe container name on the network
+		id, err := startContainerNet(ctx, sub.Image, name, network)
+		if err != nil {
+			return nil, "could not start substrate container: " + trimErr(err)
+		}
+		cid = id
+		base = "http://" + name + ":8080"
+		out.Substrate.HostPort = 8080
+		out.Steps = append(out.Steps, "started container "+shortID(cid)+" from "+sub.Image+" on network "+network+" as "+name+":8080")
+	} else {
+		port, err := freePort()
+		if err != nil {
+			return nil, "no free host port for substrate"
+		}
+		out.Substrate.HostPort = port
+		id, err := startContainer(ctx, sub.Image, port)
+		if err != nil {
+			return nil, "could not start substrate container: " + trimErr(err)
+		}
+		cid = id
+		base = fmt.Sprintf("http://127.0.0.1:%d", port)
+		out.Steps = append(out.Steps, "started container "+shortID(cid)+" from "+sub.Image+" on 127.0.0.1:"+strconv.Itoa(port))
+	}
+	out.Substrate.ContainerID = shortID(cid)
+	return &substrate{base: base, cleanup: func() { _ = stopContainer(cid) }}, ""
+}
 
 func dockerAvailable(ctx context.Context) error {
 	c, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -375,8 +530,11 @@ func forward(ctx context.Context, base string, req TestRequest) (int, string, er
 		method = "GET"
 	}
 	path := req.Path
-	if path == "" {
+	switch {
+	case path == "":
 		path = "/"
+	case !strings.HasPrefix(path, "/"):
+		path = "/" + path // join safely: base+path must not merge into the port
 	}
 	httpReq, err := http.NewRequestWithContext(c, method, base+path, strings.NewReader(req.Body))
 	if err != nil {

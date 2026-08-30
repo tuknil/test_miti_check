@@ -1,12 +1,14 @@
 #!/bin/sh
-# Runs as root: make the mounted docker socket reachable by the non-root app
-# user, then drop privileges. Postgres refuses to run as root, so the API (and
-# the embedded Postgres it starts) must run as a non-root user.
-set -e
+# Optionally authenticate to a private registry (e.g. JFrog Artifactory) before
+# serving, so the worker can pull substrate images from it. No-op when the
+# JFROG_* vars are unset. A login failure is logged but does not block startup
+# (public images still pull).
 
-if [ -S /var/run/docker.sock ]; then
-  chown app /var/run/docker.sock 2>/dev/null || true
-  chmod o+rw /var/run/docker.sock 2>/dev/null || true
+if [ -n "$JFROG_REGISTRY" ] && [ -n "$JFROG_USER" ] && [ -n "$JFROG_TOKEN" ]; then
+ echo "entrypoint: docker login to $JFROG_REGISTRY as $JFROG_USER"
+ echo "$JFROG_TOKEN" | docker login "$JFROG_REGISTRY" -u "$JFROG_USER" --password-stdin \
+   || echo "entrypoint: docker login to $JFROG_REGISTRY failed; continuing"
 fi
 
-exec runuser -u app -- /app/api
+exec /app/api
+

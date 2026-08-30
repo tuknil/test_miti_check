@@ -9,9 +9,9 @@ const SCENARIO = {
   substrate_selector: "substrate:log4j-vulnerable-webserver:container",
   substrate: {
     kind: "container-image",
-    image: "ghcr.io/christophetd/log4shell-vulnerable-app:latest",
-    digest: "sha256:6f88c941c6f2c3a1d1a3d7f0f7f6c0b6f5b4a3c2d1e0f9a8b7c6d5e4f3a2b1c0d",
     port: 8080,
+    image: "artifact.it.att.com/apm0047460-dkr-stage/log4shell-vulnerable-app:latest",
+    digest: "sha256:6f88430688108e512f7405ac3c73d47f5c370780b94182854ea2cddc6bd59929",
     vulnerability_id: "CVE-2021-44228",
   },
   candidate: {
@@ -48,8 +48,31 @@ const statusEl = document.getElementById("composer-status");
 const runListEl = document.getElementById("run-list");
 const detailEl = document.getElementById("detail");
 const composerEl = document.getElementById("composer");
+const execToggle = document.getElementById("exec-toggle");
+const execNote = document.getElementById("exec-note");
 
 let selectedRunId = null;
+let execMode = "local";
+
+const EXEC_NOTES = {
+  local: "Runs the substrate on the host Docker daemon.",
+  inmemory: "Runs entirely inside the API — an in-process stand-in target, no Docker/cloud. Fast and portable; validates rule logic, not the real vulnerable image.",
+  firewall: "In-memory L3/L4 firewall-rule evaluation (no substrate). Expects a firewall-rule candidate + a network-connection test — see scenarios/05-06.",
+  aci: "Runs the substrate as an Azure Container Instance via DefaultAzureCredential (managed identity on ACA; needs Azure config).",
+  "aci-sp": "Azure Container Instance authenticated with a service principal (AZURE_TENANT_ID/CLIENT_ID/CLIENT_SECRET) — works from a laptop or ACA.",
+  github: "Dispatches a GitHub Actions workflow that runs the scenario, then stores the retrieved result (needs GitHub config).",
+  "github-ghcr": "Like GitHub Actions, but the API first relays the substrate image into the repo's GHCR (and sets a runner pull secret) so the runner needs no access to the source registry.",
+};
+
+execToggle.addEventListener("click", (e) => {
+  const btn = e.target.closest(".toggle-opt");
+  if (!btn) return;
+  execMode = btn.dataset.mode;
+  execToggle.querySelectorAll(".toggle-opt").forEach((b) =>
+    b.classList.toggle("active", b === btn)
+  );
+  execNote.textContent = EXEC_NOTES[execMode] || "";
+});
 
 // Landing view: only the submit composer is shown.
 function showLanding() {
@@ -196,9 +219,12 @@ function outcomeHTML(o) {
       </table>
       <p class="detail-line">${esc(act.detail || "")}</p>
       <div class="substrate">substrate: ${esc(sub.image || "?")}${
-        sub.container_id ? " · container " + esc(sub.container_id) : ""
+        sub.runner ? " · runner " + esc(sub.runner) : ""
+      }${sub.container_id ? " · " + esc(sub.container_id) : ""}${
+        sub.fqdn ? " · " + esc(sub.fqdn) : ""
       }${sub.host_port ? " · :" + esc(sub.host_port) : ""} · ready=${!!sub.ready}</div>
       <details><summary>execution steps</summary><ol>${steps}</ol></details>
+      <details open><summary>full response JSON</summary><pre class="json-dump">${esc(JSON.stringify(o, null, 2))}</pre></details>
     </div>`;
 }
 
@@ -213,6 +239,8 @@ form.addEventListener("submit", async (e) => {
     setStatus("err", "Payload is not valid JSON: " + err.message);
     return;
   }
+  // The toggle is authoritative for where the substrate runs.
+  payload.execution_mode = execMode;
 
   const url = apiBase() + "/v1/mitigation-check-runs";
   submitBtn.disabled = true;
@@ -242,5 +270,8 @@ form.addEventListener("submit", async (e) => {
 });
 
 // ---- Init ----
+// API endpoint comes from the runtime-injected env (window.MC_API_BASE), falling
+// back to localhost for local dev. The field stays editable for manual override.
+apiBaseInput.value = (window.MC_API_BASE || "http://localhost:8137").trim();
 payloadEl.value = JSON.stringify(SCENARIO, null, 2);
 loadRuns();

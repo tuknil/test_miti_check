@@ -1,25 +1,61 @@
-# mitigation-check: UI + API as containers.
+# mitigation-check: UI + API + Postgres as containers.
 #
 # The API launches the validation-substrate container on the host Docker daemon
 # (mounted docker.sock) and attaches it to the shared `mitigation-net` network,
-# reaching it by name. The run ledger is stored on the named volume `ledger-data`,
-# which survives `docker stop` and `docker rm` (only `docker compose down -v`
-# deletes it).
+# reaching it by name. The run ledger lives in the `db` Postgres container; its
+# data is on the named volume `pgdata`, which survives `docker stop` and
+# `docker rm` of the db container (only `docker compose down -v` deletes it).
 
 services:
+  db:
+    image: artifact.it.att.com/astra-secure-container-catalog/postgresql:17.10-r1@sha256:c2ceffcba898b179fccfb526396f301a965fbd895d2b28e5484ed62789fac042
+    container_name: mitigation-db
+    environment:
+      POSTGRES_USER: mc
+      POSTGRES_PASSWORD: mc
+      POSTGRES_DB: mitigation
+    volumes:
+      - pgdata:/var/lib/postgresql/data      # durable ledger data
+    networks:
+      - mitnet
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mc -d mitigation"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
   api:
     build: ./api
     image: mitigation-check-api
     container_name: mitigation-api
     environment:
       PORT: "8137"
-      MC_DATA_DIR: /app/data
+      GODEBUG: x509negativeserial=1
+      DATABASE_URL: postgres://mc:mc@db:5432/mitigation?sslmode=disable
       MC_SUBSTRATE_NETWORK: mitigation-net
+      # Azure ACI execution mode (optional).
+      AZURE_SUBSCRIPTION_ID: ${AZURE_SUBSCRIPTION_ID:-}
+      MC_ACI_RESOURCE_GROUP: ${MC_ACI_RESOURCE_GROUP:-}
+      MC_ACI_REGION: ${MC_ACI_REGION:-}
+      # Service-principal auth for the "aci-sp" mode (works from a laptop or ACA).
+      AZURE_TENANT_ID: ${AZURE_TENANT_ID:-}
+      AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:-}
+      AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET:-}
+      JFROG_REGISTRY: ${JFROG_REGISTRY:-}
+      JFROG_USER: ${JFROG_USER:-}
+      JFROG_TOKEN: ${JFROG_TOKEN:-}
+      DATABRICKS_DSN: ${DATABRICKS_DSN:-}
+      DATABRICKS_CATALOG: ${DATABRICKS_CATALOG:-}
+      DATABRICKS_SCHEMA: ${DATABRICKS_SCHEMA:-}
+      DATABRICKS_TABLE: ${DATABRICKS_TABLE:-}
     ports:
       - "8137:8137"
     volumes:
-      - pgledger:/app/data                           # embedded-postgres cluster (durable)
       - /var/run/docker.sock:/var/run/docker.sock    # launch substrate containers
+    depends_on:
+      db:
+        condition: service_healthy
     networks:
       - mitnet
     restart: unless-stopped
@@ -28,6 +64,8 @@ services:
     build: ./ui
     image: mitigation-check-ui
     container_name: mitigation-ui
+    environment:
+      API_BASE: ${API_BASE:-http://localhost:8137}
     ports:
       - "8082:80"
     depends_on:
@@ -37,7 +75,7 @@ services:
     restart: unless-stopped
 
 volumes:
-  pgledger:
+  pgdata:
 
 networks:
   mitnet:

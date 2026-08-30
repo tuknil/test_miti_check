@@ -1,2 +1,9 @@
 # Runtime run ledger (durable, but not source)
 api/data/
+
+# Local secrets / env (never commit tokens)
+.env
+*.env
+
+# Editor swap files
+*.swp

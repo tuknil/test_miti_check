@@ -26,6 +26,10 @@ import (
 
 const contractID = "mitigation-check@1.0"
 
+// upstreamContractID is the contract of the incoming defense-generation payload
+// that now carries the mitigation rule (primary_candidate.artifact_content).
+const upstreamContractID = "defense-generation@1.0"
+
 //go:embed openapi.yaml
 var openapiSpec []byte
 
@@ -45,6 +49,38 @@ type SubmitMitigationCheckRequest struct {
 	Substrate           json.RawMessage `json:"substrate,omitempty"`
 	Candidate           json.RawMessage `json:"candidate,omitempty"`
 	TestBasis           json.RawMessage `json:"test_basis,omitempty"`
+	// ExecutionMode selects the substrate adapter. Defaults to "inmemory" when
+	// omitted; other values include "local" (docker), "aci"/"aci-sp", "github",
+	// "github-ghcr", and "firewall".
+	ExecutionMode string `json:"execution_mode,omitempty"`
+	// CorrelationID is echoed into the result envelope (optional).
+	CorrelationID string `json:"correlation_id,omitempty"`
+
+	// --- Upstream defense-generation payload (new input contract) ---
+	// The mitigation rule is taken from primary_candidate.artifact_content. The
+	// remaining envelope fields are accepted (so a full defense-generation result
+	// validates) but not yet consumed; upstream_inputs will later carry the test.
+	PrimaryCandidateRaw json.RawMessage `json:"primary_candidate,omitempty"`
+	AttemptHistory      json.RawMessage `json:"attempt_history,omitempty"`
+	OutcomeReason       json.RawMessage `json:"outcome_reason,omitempty"`
+	ProofHandoffs       json.RawMessage `json:"proof_handoffs,omitempty"`
+	UpstreamInputs      json.RawMessage `json:"upstream_inputs,omitempty"`
+	UpstreamResultRef   json.RawMessage `json:"result_ref,omitempty"`
+	ProducedAt          string          `json:"produced_at,omitempty"`
+	UpstreamProse       string          `json:"prose_summary,omitempty"`
+	UpstreamResultID    string          `json:"result_id,omitempty"`
+	UpstreamTerminal    string          `json:"terminal_state,omitempty"`
+}
+
+// PrimaryCandidate is the upstream defense-generation candidate. artifact_content
+// carries the actual mitigation rule (a ModSecurity SecRule).
+type PrimaryCandidate struct {
+	ArtifactContent      string `json:"artifact_content"`
+	ArtifactType         string `json:"artifact_type"`
+	CandidateID          string `json:"candidate_id"`
+	CandidateKind        string `json:"candidate_kind"`
+	Discriminator        string `json:"discriminator"`
+	SelectedControlClass string `json:"selected_control_class"`
 }
 
 // SubstrateSpec is the inline validation substrate — a bounded, non-production
@@ -103,17 +139,53 @@ type APIError struct {
 }
 
 var store *RunStore
+var dbx *DatabricksSink
+
+// upstreamInputMode selects the separate upstream executor: the mitigation rule is
+// read from a Databricks table referenced by the request's upstream_inputs, instead
+// of the inline candidate. On by default; set env MC_INPUT_UPSTREAM=0 to disable.
+var upstreamInputMode bool
+
+// dbxReader reads upstream result_json rows from Databricks (upstream mode only).
+var dbxReader *DatabricksReader
 
 func main() {
-	dataDir := os.Getenv("MC_DATA_DIR")
-	if dataDir == "" {
-		dataDir = "data"
+	// CLI mode used by the GitHub Actions workflow: run one scenario locally
+	// (docker on the runner) and print the RunOutcome JSON to stdout. No DB.
+	if len(os.Args) > 2 && os.Args[1] == "run-scenario" {
+		runScenarioCLI(os.Args[2])
+		return
 	}
-	s, err := NewRunStore(dataDir)
+	// CLI: convert an http-probe stimulus (file arg or stdin) into a TestBasisSpec.
+	if len(os.Args) > 1 && os.Args[1] == "stimulus-to-testbasis" {
+		stimulusCLI(os.Args[2:])
+		return
+	}
+
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		dsn = "postgres://mc:mc@localhost:5432/mitigation?sslmode=disable"
+	}
+	s, err := NewRunStore(dsn)
 	if err != nil {
 		log.Fatalf("could not open run ledger: %v", err)
 	}
 	store = s
+
+	// Optional secondary sink (Databricks Delta). nil when DATABRICKS_DSN is unset.
+	dbx = NewDatabricksSink()
+
+	// Separate upstream executor (rule read from Databricks) — toggled by env, and
+	// ON by default; set MC_INPUT_UPSTREAM to 0/false/no to use the legacy executor.
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("MC_INPUT_UPSTREAM")))
+	if v == "" {
+		v = "1"
+	}
+	if v == "1" || v == "true" || v == "yes" {
+		upstreamInputMode = true
+		dbxReader = NewDatabricksReader()
+		log.Printf("input contract: UPSTREAM mode (rule read from Databricks via upstream_inputs)")
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/mitigation-check-runs", withCORS(handleRunsCollection))
@@ -143,12 +215,57 @@ func main() {
 	log.Printf("mitigation-check API listening on %s", srv.Addr)
 	err = srv.ListenAndServe()
 	store.Close() // synchronous: guarantees postgres stops cleanly before exit
+	dbx.Close()
+	dbxReader.Close()
 	if err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
 }
 
 // handleOpenAPI serves the embedded OpenAPI 3 spec.
+// enrichEnvelope fills the result-envelope fields on the outcome: capability /
+// contract, workflow status, the echoed correlation id, evidence refs, and a
+// result_ref pointing at the Databricks row (keyed by run_id + result_id, the
+// same values written to that table so a consumer can query it).
+func enrichEnvelope(out *RunOutcome, correlationID string) {
+	out.Capability = "mitigation-check"
+	out.ContractID = contractID
+	out.CorrelationID = correlationID
+	out.EvidenceRefs = []string{}
+	if out.TerminalState == stateMalfunction {
+		out.Status = "failed"
+	} else {
+		out.Status = "completed"
+	}
+	out.ResultRef = &ResultRef{
+		System:  "databricks",
+		Catalog: os.Getenv("DATABRICKS_CATALOG"),
+		Schema:  os.Getenv("DATABRICKS_SCHEMA"),
+		Table:   firstNonEmpty(os.Getenv("DATABRICKS_TABLE"), "mitigation_check"),
+		Key:     out.ResultID,
+	}
+}
+
+// runScenarioCLI executes one scenario file and prints the RunOutcome JSON to
+// stdout. Used by the GitHub Actions workflow; keeps stdout JSON-only.
+func runScenarioCLI(path string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		log.Fatalf("read scenario: %v", err)
+	}
+	var req SubmitMitigationCheckRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		log.Fatalf("parse scenario: %v", err)
+	}
+	req.ExecutionMode = execLocal // on the runner, use docker
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	out := executeScenario(ctx, req, "mc-run-"+newID(), resultIDPrefix+newID())
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(out)
+}
+
 func handleOpenAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/yaml")
 	_, _ = w.Write(openapiSpec)
@@ -246,14 +363,41 @@ func handleSubmitRun(w http.ResponseWriter, r *http.Request) {
 	// the candidate WAF rule, run the supplied test, and resolve a terminal state
 	// (LLD §5, §6.4, §6.5). Bounded by a request-scoped timeout.
 	runID := "mc-run-" + newID()
-	resultID := "mitigation-check-result:" + newID()
+	resultID := resultIDPrefix + newID()
 
-	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
+	// GitHub runs dispatch a remote workflow (checkout + build + docker pull +
+	// run), which takes longer than a local container bring-up.
+	budget := 3 * time.Minute
+	switch req.ExecutionMode {
+	case execGitHub, execGitHubGHCR:
+		budget = 12 * time.Minute
+	case execACI, execACISP:
+		budget = 10 * time.Minute // ACI provisioning + image pull + app start
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), budget)
 	defer cancel()
 
-	outcome := executeScenario(ctx, req, runID, resultID)
+	var outcome RunOutcome
+	if upstreamInputMode {
+		outcome = executeScenarioUpstream(ctx, req, runID, resultID)
+	} else {
+		outcome = executeScenario(ctx, req, runID, resultID)
+	}
+	enrichEnvelope(&outcome, req.CorrelationID)
 
-	// Record the run in the ledger with the exact immutable request bytes.
+	// Secondary sink: write the result to the Databricks table synchronously so the
+	// envelope's status can reflect the write. terminal_state stays the test result;
+	// only status degrades to "storage-failed" when the write fails (the run is not
+	// a hard failure). A malfunction is already "failed", so a write failure there
+	// doesn't change it — but the row is still written for diagnostics.
+	if dbx != nil {
+		if err := dbx.Write(ctx, outcome); err != nil && outcome.TerminalState != stateMalfunction {
+			outcome.Status = "storage-failed"
+		}
+	}
+
+	// Record the run in the ledger (source of truth) with the exact immutable
+	// request bytes and the final envelope (including the resolved status).
 	if err := store.Add(&RunRecord{
 		RunID:         runID,
 		ResultID:      resultID,
@@ -310,19 +454,32 @@ func decodeRequest(r *http.Request) (SubmitMitigationCheckRequest, json.RawMessa
 // and returns the names of every offending field.
 func validate(req SubmitMitigationCheckRequest) []string {
 	var bad []string
-	if req.ContractID != contractID {
+	// In upstream-input mode the rule is read from Databricks via upstream_inputs, so
+	// the legacy reference ids are not required and the upstream contract is accepted.
+	if req.ContractID != contractID && !(upstreamInputMode && req.ContractID == upstreamContractID) {
 		bad = append(bad, "contract_id")
 	}
-	if strings.TrimSpace(req.CandidateArtifactID) == "" {
-		bad = append(bad, "candidate_artifact_id")
-	}
-	if strings.TrimSpace(req.TestBasisID) == "" {
-		bad = append(bad, "test_basis_id")
-	}
-	if strings.TrimSpace(req.CheckProfileID) == "" {
-		bad = append(bad, "check_profile_id")
+	if upstreamInputMode {
+		if len(req.UpstreamInputs) == 0 {
+			bad = append(bad, "upstream_inputs")
+		}
+	} else {
+		if strings.TrimSpace(req.CandidateArtifactID) == "" {
+			bad = append(bad, "candidate_artifact_id")
+		}
+		if strings.TrimSpace(req.TestBasisID) == "" {
+			bad = append(bad, "test_basis_id")
+		}
+		if strings.TrimSpace(req.CheckProfileID) == "" {
+			bad = append(bad, "check_profile_id")
+		}
 	}
 	// substrate_selector is optional (LLD §10.1) — no constraint.
+
+	// execution_mode is optional; when set it must be a known adapter.
+	if m := req.ExecutionMode; m != "" && m != execLocal && m != execInMemory && m != execACI && m != execACISP && m != execGitHub && m != execGitHubGHCR && m != execFirewall {
+		bad = append(bad, "execution_mode")
+	}
 
 	// Nested artifact bodies are optional, but validated when present.
 	if len(req.Substrate) > 0 {

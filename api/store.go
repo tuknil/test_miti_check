@@ -1,9 +1,8 @@
 package main
 
 // store.go is the run ledger (LLD §11.1: mitigation_check_run / _result), backed
-// by an embedded PostgreSQL instance managed in-process. The Postgres data
-// cluster lives under MC_DATA_DIR, so it is durable across docker stop / rm when
-// that path is a mounted volume.
+// by a PostgreSQL database (run as its own container via docker compose). Data
+// durability is a property of the db container's volume, not this process.
 //
 // The immutable request and the executed response are stored as JSONB columns.
 
@@ -12,11 +11,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
-	"path/filepath"
 	"time"
 
-	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -41,52 +37,32 @@ type RunSummary struct {
 	Summary       string    `json:"summary"`
 }
 
-const (
-	pgPort     = 5433
-	pgUser     = "mc"
-	pgPassword = "mc"
-	pgDatabase = "mitigation"
-)
-
 type RunStore struct {
-	pg *embeddedpostgres.EmbeddedPostgres
 	db *sql.DB
 }
 
-// NewRunStore boots an embedded Postgres whose cluster/binaries live under base,
-// connects, and ensures the schema exists. base should be a mounted volume for
-// durability. Binaries and runtime are cached under base too, so a recreated
-// container does not re-download them.
-func NewRunStore(base string) (*RunStore, error) {
-	if err := os.MkdirAll(base, 0o755); err != nil {
-		return nil, fmt.Errorf("create ledger dir: %w", err)
-	}
-
-	pg := embeddedpostgres.NewDatabase(embeddedpostgres.DefaultConfig().
-		Username(pgUser).
-		Password(pgPassword).
-		Database(pgDatabase).
-		Version(embeddedpostgres.V16).
-		Port(pgPort).
-		DataPath(filepath.Join(base, "pg-data")).
-		RuntimePath(filepath.Join(base, "pg-runtime")).
-		BinariesPath(filepath.Join(base, "pg-bin")).
-		Logger(os.Stderr).
-		StartTimeout(120 * time.Second))
-
-	log.Printf("ledger: starting embedded postgres (data under %s)…", base)
-	if err := pg.Start(); err != nil {
-		return nil, fmt.Errorf("start embedded postgres: %w", err)
-	}
-
-	dsn := fmt.Sprintf("postgres://%s:%s@localhost:%d/%s?sslmode=disable",
-		pgUser, pgPassword, pgPort, pgDatabase)
+// NewRunStore connects to Postgres at dsn, waiting for it to accept connections
+// (the db container may still be starting), then ensures the schema exists.
+func NewRunStore(dsn string) (*RunStore, error) {
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
-		_ = pg.Stop()
 		return nil, fmt.Errorf("open db: %w", err)
 	}
 	db.SetMaxOpenConns(8)
+	db.SetConnMaxLifetime(30 * time.Minute)
+
+	var pingErr error
+	for i := 0; i < 30; i++ {
+		if pingErr = db.Ping(); pingErr == nil {
+			break
+		}
+		log.Printf("ledger: waiting for postgres… (%v)", pingErr)
+		time.Sleep(2 * time.Second)
+	}
+	if pingErr != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("postgres not reachable: %w", pingErr)
+	}
 
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS mitigation_check_run (
@@ -99,12 +75,11 @@ func NewRunStore(base string) (*RunStore, error) {
 			response       JSONB       NOT NULL
 		)`); err != nil {
 		_ = db.Close()
-		_ = pg.Stop()
 		return nil, fmt.Errorf("create schema: %w", err)
 	}
 
-	s := &RunStore{pg: pg, db: db}
-	log.Printf("ledger: embedded postgres ready (%d run(s))", s.count())
+	s := &RunStore{db: db}
+	log.Printf("ledger: connected to postgres (%d run(s))", s.count())
 	return s, nil
 }
 
@@ -114,13 +89,11 @@ func (s *RunStore) count() int {
 	return n
 }
 
-// Close stops accepting queries and shuts the embedded Postgres down cleanly.
+// Close releases the connection pool. The database itself lives in the db
+// container and its data persists on that container's volume.
 func (s *RunStore) Close() {
 	if s.db != nil {
 		_ = s.db.Close()
-	}
-	if s.pg != nil {
-		_ = s.pg.Stop()
 	}
 }
 
