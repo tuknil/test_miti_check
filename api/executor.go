@@ -299,14 +299,14 @@ type wafRule struct {
 	ruleID  string
 	status  int
 	re      *regexp.Regexp
+	target  string
 	clamped bool // a PCRE quantifier bound >1000 was clamped to fit RE2
-	// targets left implicit: URI + header values + body (covers
-	// REQUEST_URI | REQUEST_HEADERS | ARGS | REQUEST_BODY).
 }
 
 var (
 	reRuleID = regexp.MustCompile(`\bid:(\d+)`)
 	reStatus = regexp.MustCompile(`\bstatus:(\d+)`)
+	reTarget = regexp.MustCompile(`(?m)^\s*SecRule\s+(\S+)\s+`)
 	// reQuant matches a bounded quantifier: {n}, {n,}, or {n,m}.
 	reQuant = regexp.MustCompile(`\{(\d+)(,(\d*))?\}`)
 )
@@ -343,6 +343,14 @@ func clampRE2Repeats(pat string) (string, bool) {
 }
 
 func compileRule(c CandidateSpec) (*wafRule, error) {
+	targetMatch := reTarget.FindStringSubmatch(c.Rule)
+	if targetMatch == nil {
+		return nil, fmt.Errorf("no SecRule target found")
+	}
+	target := targetMatch[1]
+	if !supportedTarget(target) {
+		return nil, fmt.Errorf("unsupported SecRule target %q", target)
+	}
 	pattern, ok := extractRx(c.Rule)
 	if !ok {
 		return nil, fmt.Errorf("no @rx operator found")
@@ -352,7 +360,7 @@ func compileRule(c CandidateSpec) (*wafRule, error) {
 	if err != nil {
 		return nil, err
 	}
-	r := &wafRule{re: re, ruleID: c.RuleID, status: 403, clamped: clamped}
+	r := &wafRule{re: re, ruleID: c.RuleID, status: 403, target: target, clamped: clamped}
 	if m := reRuleID.FindStringSubmatch(c.Rule); m != nil && r.ruleID == "" {
 		r.ruleID = m[1]
 	}
@@ -364,31 +372,49 @@ func compileRule(c CandidateSpec) (*wafRule, error) {
 	return r, nil
 }
 
-// extractRx pulls the regex out of the first quoted operator argument of a SecRule.
+func supportedTarget(target string) bool {
+	return target == "REQUEST_BODY" || target == "REQUEST_URI" ||
+		target == "REQUEST_HEADERS" || target == "ARGS" ||
+		target == "ARGS_NAMES" || strings.HasPrefix(target, "ARGS:")
+}
+
+// extractRx pulls the regex out of the first quoted operator argument of a
+// SecRule. ModSecurity quoted strings escape backslashes and quotes, so decode
+// exactly that serialization layer while preserving regex escapes such as \d.
 func extractRx(rule string) (string, bool) {
 	i := strings.Index(rule, `"`)
 	if i < 0 {
 		return "", false
 	}
-	rest := rule[i+1:]
-	j := strings.Index(rest, `"`)
-	if j < 0 {
-		return "", false
+
+	var quoted strings.Builder
+	for j := i + 1; j < len(rule); j++ {
+		switch rule[j] {
+		case '\\':
+			if j+1 < len(rule) && (rule[j+1] == '\\' || rule[j+1] == '"') {
+				quoted.WriteByte(rule[j+1])
+				j++
+				continue
+			}
+			quoted.WriteByte(rule[j])
+		case '"':
+			op := strings.TrimSpace(quoted.String())
+			if strings.HasPrefix(op, "@rx") {
+				return strings.TrimSpace(strings.TrimPrefix(op, "@rx")), true
+			}
+			return "", false
+		default:
+			quoted.WriteByte(rule[j])
+		}
 	}
-	op := strings.TrimSpace(rest[:j])
-	if strings.HasPrefix(op, "@rx") {
-		return strings.TrimSpace(strings.TrimPrefix(op, "@rx")), true
-	}
+
 	return "", false
 }
 
-// evaluate applies the rule to the request, mirroring t:urlDecodeUni by matching
-// against both raw and URL-decoded forms of the URI, header values, and body.
+// evaluate applies the rule only to values selected by its ModSecurity target.
+// Each selected value is checked raw and after one URL-decoding pass.
 func (w *wafRule) evaluate(req TestRequest) (bool, string) {
-	candidates := []string{req.Path, req.Body}
-	for _, v := range req.Headers {
-		candidates = append(candidates, v)
-	}
+	candidates := targetValues(w.target, req)
 	for _, raw := range candidates {
 		for _, s := range []string{raw, urlDecode(raw)} {
 			if s != "" && w.re.MatchString(s) {
@@ -397,6 +423,53 @@ func (w *wafRule) evaluate(req TestRequest) (bool, string) {
 		}
 	}
 	return false, ""
+}
+
+func targetValues(target string, req TestRequest) []string {
+	switch target {
+	case "REQUEST_BODY":
+		return []string{req.Body}
+	case "REQUEST_URI":
+		return []string{req.Path}
+	case "REQUEST_HEADERS":
+		values := make([]string, 0, len(req.Headers))
+		for _, value := range req.Headers {
+			values = append(values, value)
+		}
+		return values
+	case "ARGS", "ARGS_NAMES":
+		arguments := requestArguments(req)
+		values := make([]string, 0, len(arguments))
+		for name, entries := range arguments {
+			if target == "ARGS_NAMES" {
+				values = append(values, name)
+			} else {
+				values = append(values, entries...)
+			}
+		}
+		return values
+	default:
+		if strings.HasPrefix(target, "ARGS:") {
+			return requestArguments(req)[strings.TrimPrefix(target, "ARGS:")]
+		}
+		return nil
+	}
+}
+
+func requestArguments(req TestRequest) url.Values {
+	arguments := make(url.Values)
+	merge := func(values url.Values) {
+		for name, entries := range values {
+			arguments[name] = append(arguments[name], entries...)
+		}
+	}
+	if values, err := url.ParseQuery(req.Body); err == nil {
+		merge(values)
+	}
+	if parsed, err := url.ParseRequestURI(req.Path); err == nil {
+		merge(parsed.Query())
+	}
+	return arguments
 }
 
 func urlDecode(s string) string {
