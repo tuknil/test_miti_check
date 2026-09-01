@@ -4,7 +4,7 @@ import "testing"
 
 func TestCompileRuleDecodesModSecurityQuotedRegex(t *testing.T) {
 	candidate := CandidateSpec{
-		Rule: `SecRule ARGS "@rx person\\[0\\]\\[\\]=malicious" "id:1001,phase:2,deny,status:403"`,
+		Rule: `SecRule REQUEST_BODY "@rx person\\[0\\]\\[\\]=malicious" "id:1001,phase:2,deny,status:403"`,
 	}
 
 	rule, err := compileRule(candidate)
@@ -65,7 +65,7 @@ func TestExtractRxDecodesQuotedStringOnce(t *testing.T) {
 
 func TestCompileRulePreservesSimpleSQLiPattern(t *testing.T) {
 	candidate := CandidateSpec{
-		Rule: `SecRule ARGS "@rx Researcher=' OR '1'='1" "id:1002,phase:2,deny,status:403"`,
+		Rule: `SecRule REQUEST_BODY "@rx Researcher=' OR '1'='1" "id:1002,phase:2,deny,status:403"`,
 	}
 
 	rule, err := compileRule(candidate)
@@ -76,5 +76,45 @@ func TestCompileRulePreservesSimpleSQLiPattern(t *testing.T) {
 	matched, _ := rule.evaluate(TestRequest{Body: `Researcher=' OR '1'='1`})
 	if !matched {
 		t.Fatal("simple SQL injection rule no longer matches")
+	}
+}
+
+func TestNamedArgumentTargetDoesNotMatchSerializedBody(t *testing.T) {
+	candidate := CandidateSpec{
+		Rule: `SecRule ARGS:Researcher "@rx Researcher=' OR '1'='1&action=saveUser" "id:1003,phase:2,deny,status:403"`,
+	}
+	rule, err := compileRule(candidate)
+	if err != nil {
+		t.Fatalf("compileRule: %v", err)
+	}
+
+	matched, _ := rule.evaluate(TestRequest{Body: `Researcher=' OR '1'='1&action=saveUser`})
+	if matched {
+		t.Fatal("ARGS:Researcher incorrectly matched the complete serialized body")
+	}
+}
+
+func TestNamedArgumentTargetMatchesOnlyArgumentValue(t *testing.T) {
+	candidate := CandidateSpec{
+		Rule: `SecRule ARGS:Researcher "@rx ^' OR '1'='1$" "id:1004,phase:2,deny,status:403"`,
+	}
+	rule, err := compileRule(candidate)
+	if err != nil {
+		t.Fatalf("compileRule: %v", err)
+	}
+
+	matched, value := rule.evaluate(TestRequest{Body: `Researcher=%27+OR+%271%27%3D%271&action=saveUser`})
+	if !matched {
+		t.Fatal("ARGS:Researcher did not match its decoded argument value")
+	}
+	if value != `' OR '1'='1` {
+		t.Fatalf("matched value = %q, want named argument value", value)
+	}
+}
+
+func TestCompileRuleRejectsUnsupportedTarget(t *testing.T) {
+	_, err := compileRule(CandidateSpec{Rule: `SecRule REMOTE_ADDR "@rx test" "deny"`})
+	if err == nil {
+		t.Fatal("unsupported target was accepted")
 	}
 }
