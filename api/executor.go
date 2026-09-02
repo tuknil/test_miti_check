@@ -25,6 +25,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -299,7 +300,7 @@ type wafRule struct {
 	ruleID  string
 	status  int
 	re      *regexp.Regexp
-	target  string
+	targets []string
 	clamped bool // a PCRE quantifier bound >1000 was clamped to fit RE2
 }
 
@@ -347,9 +348,9 @@ func compileRule(c CandidateSpec) (*wafRule, error) {
 	if targetMatch == nil {
 		return nil, fmt.Errorf("no SecRule target found")
 	}
-	target := targetMatch[1]
-	if !supportedTarget(target) {
-		return nil, fmt.Errorf("unsupported SecRule target %q", target)
+	targets, err := parseTargets(targetMatch[1])
+	if err != nil {
+		return nil, err
 	}
 	pattern, ok := extractRx(c.Rule)
 	if !ok {
@@ -360,7 +361,7 @@ func compileRule(c CandidateSpec) (*wafRule, error) {
 	if err != nil {
 		return nil, err
 	}
-	r := &wafRule{re: re, ruleID: c.RuleID, status: 403, target: target, clamped: clamped}
+	r := &wafRule{re: re, ruleID: c.RuleID, status: 403, targets: targets, clamped: clamped}
 	if m := reRuleID.FindStringSubmatch(c.Rule); m != nil && r.ruleID == "" {
 		r.ruleID = m[1]
 	}
@@ -372,10 +373,26 @@ func compileRule(c CandidateSpec) (*wafRule, error) {
 	return r, nil
 }
 
+func parseTargets(expression string) ([]string, error) {
+	parts := strings.Split(expression, "|")
+	if len(parts) > 16 {
+		return nil, fmt.Errorf("SecRule target expression exceeds 16 components")
+	}
+	for _, target := range parts {
+		if target == "" || strings.HasPrefix(target, "!") || !supportedTarget(target) {
+			return nil, fmt.Errorf("unsupported SecRule target %q", target)
+		}
+	}
+	return parts, nil
+}
+
 func supportedTarget(target string) bool {
+	if strings.HasPrefix(target, "ARGS:") {
+		return strings.TrimPrefix(target, "ARGS:") != ""
+	}
 	return target == "REQUEST_BODY" || target == "REQUEST_URI" ||
 		target == "REQUEST_HEADERS" || target == "ARGS" ||
-		target == "ARGS_NAMES" || strings.HasPrefix(target, "ARGS:")
+		target == "ARGS_NAMES"
 }
 
 // extractRx pulls the regex out of the first quoted operator argument of a
@@ -414,7 +431,7 @@ func extractRx(rule string) (string, bool) {
 // evaluate applies the rule only to values selected by its ModSecurity target.
 // Each selected value is checked raw and after one URL-decoding pass.
 func (w *wafRule) evaluate(req TestRequest) (bool, string) {
-	candidates := targetValues(w.target, req)
+	candidates := targetValues(w.targets, req)
 	for _, raw := range candidates {
 		for _, s := range []string{raw, urlDecode(raw)} {
 			if s != "" && w.re.MatchString(s) {
@@ -425,7 +442,15 @@ func (w *wafRule) evaluate(req TestRequest) (bool, string) {
 	return false, ""
 }
 
-func targetValues(target string, req TestRequest) []string {
+func targetValues(targets []string, req TestRequest) []string {
+	values := make([]string, 0)
+	for _, target := range targets {
+		values = append(values, targetValuesForOne(target, req)...)
+	}
+	return values
+}
+
+func targetValuesForOne(target string, req TestRequest) []string {
 	switch target {
 	case "REQUEST_BODY":
 		return []string{req.Body}
@@ -433,18 +458,28 @@ func targetValues(target string, req TestRequest) []string {
 		return []string{req.Path}
 	case "REQUEST_HEADERS":
 		values := make([]string, 0, len(req.Headers))
-		for _, value := range req.Headers {
-			values = append(values, value)
+		names := make([]string, 0, len(req.Headers))
+		for name := range req.Headers {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			values = append(values, req.Headers[name])
 		}
 		return values
 	case "ARGS", "ARGS_NAMES":
 		arguments := requestArguments(req)
 		values := make([]string, 0, len(arguments))
-		for name, entries := range arguments {
+		names := make([]string, 0, len(arguments))
+		for name := range arguments {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
 			if target == "ARGS_NAMES" {
 				values = append(values, name)
 			} else {
-				values = append(values, entries...)
+				values = append(values, arguments[name]...)
 			}
 		}
 		return values
