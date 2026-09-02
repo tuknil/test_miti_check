@@ -56,6 +56,40 @@ on:
           - debug
 
 jobs:
+  lifecycle-postgres:
+    name: Go tests with durable PostgreSQL
+    runs-on: concordia-linux-cpu2-ram7gi
+    services:
+      postgres:
+        image: artifact.it.att.com/astra-secure-container-catalog/postgresql:17.10-r1@sha256:c2ceffcba898b179fccfb526396f301a965fbd895d2b28e5484ed62789fac042
+        credentials:
+          username: ${{ secrets.JFROG_USERNAME }}
+          password: ${{ secrets.JFROG_ACCESS_TOKEN }}
+        env:
+          POSTGRES_USER: mc
+          POSTGRES_PASSWORD: mc
+          POSTGRES_DB: mitigation
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mc -d mitigation"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      MC_TEST_DATABASE_URL: postgres://mc:mc@localhost:5432/mitigation?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: api/go.mod
+      - name: Test all Go packages with PostgreSQL lifecycle coverage
+        working-directory: api
+        run: go test ./...
+      - name: Vet all Go packages
+        working-directory: api
+        run: go vet ./...
+
   run:
     name: Run Go CI Workflow
     secrets: inherit

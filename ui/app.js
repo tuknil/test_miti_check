@@ -110,7 +110,7 @@ function setStatus(state, text) {
 async function loadRuns() {
   let runs;
   try {
-    const res = await fetch(apiBase() + "/v1/mitigation-check-runs");
+    const res = await fetch(apiBase() + "/v1/compat/mitigation-check-runs");
     runs = await res.json();
   } catch (err) {
     runListEl.innerHTML = `<li class="run-empty">Cannot reach API.</li>`;
@@ -157,7 +157,7 @@ async function selectRun(runId) {
   detailEl.innerHTML = `<p class="detail-empty">Loading ${esc(runId)}…</p>`;
   let rec;
   try {
-    const res = await fetch(apiBase() + "/v1/mitigation-check-runs/" + encodeURIComponent(runId));
+    const res = await fetch(apiBase() + "/v1/compat/mitigation-check-runs/" + encodeURIComponent(runId));
     if (!res.ok) throw new Error("HTTP " + res.status);
     rec = await res.json();
   } catch (err) {
@@ -242,7 +242,7 @@ form.addEventListener("submit", async (e) => {
   // The toggle is authoritative for where the substrate runs.
   payload.execution_mode = execMode;
 
-  const url = apiBase() + "/v1/mitigation-check-runs";
+  const url = apiBase() + "/v1/compat/mitigation-check-runs";
   submitBtn.disabled = true;
   submitBtn.textContent = "Running scenario…";
   setStatus("idle", "Bringing up the container, applying the WAF rule, running the test… (~20–40s)");
