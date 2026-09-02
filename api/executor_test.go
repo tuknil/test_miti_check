@@ -118,3 +118,83 @@ func TestCompileRuleRejectsUnsupportedTarget(t *testing.T) {
 		t.Fatal("unsupported target was accepted")
 	}
 }
+
+func TestCombinedTargetsMatchAnySelectedCollection(t *testing.T) {
+	candidate := CandidateSpec{
+		Rule: `SecRule ARGS|REQUEST_HEADERS "@rx (?i)(?:^test$|injected-header)" "id:106841,phase:2,deny,status:403"`,
+	}
+	rule, err := compileRule(candidate)
+	if err != nil {
+		t.Fatalf("compileRule: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		request TestRequest
+		matched bool
+	}{
+		{name: "form argument", request: TestRequest{Body: "username=test&password=benign"}, matched: true},
+		{name: "request header", request: TestRequest{Body: "username=benign", Headers: map[string]string{"X-Test-Input": "injected-header"}}, matched: true},
+		{name: "neither", request: TestRequest{Body: "username=benign", Headers: map[string]string{"X-Test-Input": "benign"}}, matched: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			matched, _ := rule.evaluate(tt.request)
+			if matched != tt.matched {
+				t.Fatalf("matched = %t, want %t", matched, tt.matched)
+			}
+		})
+	}
+}
+
+func TestArgumentCollectionDoesNotMatchSerializedFormBody(t *testing.T) {
+	rule, err := compileRule(CandidateSpec{
+		Rule: `SecRule ARGS|REQUEST_HEADERS "@rx username=test&password=attack" "deny,status:403"`,
+	})
+	if err != nil {
+		t.Fatalf("compileRule: %v", err)
+	}
+
+	matched, _ := rule.evaluate(TestRequest{Body: "username=test&password=attack"})
+	if matched {
+		t.Fatal("ARGS incorrectly matched the complete serialized form body")
+	}
+}
+
+func TestCombinedTargetsRejectUnsupportedOrMalformedComponents(t *testing.T) {
+	for _, expression := range []string{
+		"ARGS|REMOTE_ADDR",
+		"ARGS:Researcher|REMOTE_ADDR",
+		"ARGS|",
+		"|ARGS",
+		"ARGS||REQUEST_HEADERS",
+		"ARGS:",
+		"ARGS|!ARGS:csrf_token",
+	} {
+		t.Run(expression, func(t *testing.T) {
+			_, err := compileRule(CandidateSpec{Rule: `SecRule ` + expression + ` "@rx test" "deny"`})
+			if err == nil {
+				t.Fatal("unsupported target expression was accepted")
+			}
+		})
+	}
+}
+
+func TestTargetValuesAreDeterministicAndRetainDuplicates(t *testing.T) {
+	request := TestRequest{
+		Path:    "/probe?z=query&a=first",
+		Body:    "z=body&a=second&a=attack",
+		Headers: map[string]string{"Z-Header": "last", "A-Header": "first"},
+	}
+
+	values := targetValues([]string{"REQUEST_HEADERS", "ARGS"}, request)
+	want := []string{"first", "last", "second", "attack", "first", "body", "query"}
+	if len(values) != len(want) {
+		t.Fatalf("values = %#v, want %#v", values, want)
+	}
+	for index := range want {
+		if values[index] != want[index] {
+			t.Fatalf("values = %#v, want %#v", values, want)
+		}
+	}
+}
