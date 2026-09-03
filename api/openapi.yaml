@@ -22,11 +22,15 @@ paths:
       description: >
         Validates and durably queues work, then immediately returns. Identical
         retries reuse the run; reuse with a different normalized digest is 409.
-        Only the application/json media type is accepted. Callbacks are deferred;
-        clients must poll the status and result endpoints.
+        Only the application/json media type is accepted. The three optional
+        X-Janus-Callback-* headers enable a durable terminal-state wakeup;
+        polling remains the canonical fallback.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/CorrelationID"
+        - $ref: "#/components/parameters/CallbackURL"
+        - $ref: "#/components/parameters/CallbackWorkflowID"
+        - $ref: "#/components/parameters/CallbackSignal"
       requestBody:
         required: true
         content:
@@ -226,6 +230,24 @@ components:
       in: header
       required: true
       schema: { type: string, minLength: 1 }
+    CallbackURL:
+      name: X-Janus-Callback-URL
+      in: header
+      required: false
+      description: HTTPS orchestration callback endpoint. Required with the other callback headers.
+      schema: { type: string, format: uri, pattern: "^https://" }
+    CallbackWorkflowID:
+      name: X-Janus-Callback-Workflow-ID
+      in: header
+      required: false
+      description: Temporal child workflow ID only; a workflow run ID is never accepted or required.
+      schema: { type: string, minLength: 1 }
+    CallbackSignal:
+      name: X-Janus-Callback-Signal
+      in: header
+      required: false
+      description: Required with the other callback headers.
+      schema: { type: string, enum: ["janus.capability-completion.v1"] }
     RunID:
       name: run_id
       in: path
@@ -307,9 +329,8 @@ components:
           type: object
           deprecated: true
           description: >
-            Reserved for a later callback rollout. Any submission containing
-            this field is currently rejected with code callbacks_disabled;
-            poll the status and result endpoints.
+            Unsupported body-level callback metadata. Use the three
+            X-Janus-Callback-* request headers instead.
           additionalProperties: false
           required: [url]
           properties:

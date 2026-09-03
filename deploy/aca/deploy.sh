@@ -11,6 +11,7 @@ set -euo pipefail
 
 # ---- required ----
 : "${DATABASE_URL:?set DATABASE_URL, e.g. postgres://user:pass@host:5432/mitigation?sslmode=require}"
+: "${CAPABILITY_CALLBACK_TOKEN:?set CAPABILITY_CALLBACK_TOKEN to the shared orchestration callback secret}"
 
 # ---- core config ----
 RG="${RG:-mc-nonprod-rg}"
@@ -37,6 +38,7 @@ GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 AZURE_TENANT_ID="${AZURE_TENANT_ID:-}"
 AZURE_CLIENT_ID="${AZURE_CLIENT_ID:-}"
 AZURE_CLIENT_SECRET="${AZURE_CLIENT_SECRET:-}"
+CAPABILITY_CALLBACK_ALLOWED_HOSTS="${CAPABILITY_CALLBACK_ALLOWED_HOSTS:-}"
 
 echo "==> providers + extension"
 az extension add --name containerapp --upgrade -y >/dev/null
@@ -63,10 +65,12 @@ az containerapp create \
   --min-replicas 1 --max-replicas 1 \
   --cpu 0.5 --memory 1.0Gi \
   "${REG_ARGS[@]}" \
-  --secrets "database-url=$DATABASE_URL" \
+  --secrets "database-url=$DATABASE_URL" "capability-callback-token=$CAPABILITY_CALLBACK_TOKEN" \
   --env-vars \
     PORT=8137 \
     "DATABASE_URL=secretref:database-url" \
+    "CAPABILITY_CALLBACK_TOKEN=secretref:capability-callback-token" \
+    "CAPABILITY_CALLBACK_ALLOWED_HOSTS=$CAPABILITY_CALLBACK_ALLOWED_HOSTS" \
     "AZURE_SUBSCRIPTION_ID=$SUBSCRIPTION_ID" \
     "MC_ACI_RESOURCE_GROUP=$ACI_RG" \
     "MC_ACI_REGION=$ACI_REGION" \
