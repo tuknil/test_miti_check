@@ -162,15 +162,10 @@ func executeScenario(ctx context.Context, req SubmitMitigationCheckRequest, runI
 	if err := json.Unmarshal(nonNil(req.Candidate), &cand); err != nil || cand.Rule == "" {
 		return couldNotTest(out, "candidate WAF rule not provided in request body")
 	}
-	if err := json.Unmarshal(nonNil(req.TestBasis), &test); err != nil || test.Expected.Blocked == nil {
-		return couldNotTest(out, "test basis / expected outcome not provided in request body")
+	if err := json.Unmarshal(nonNil(req.TestBasis), &test); err != nil {
+		return couldNotTest(out, "test basis not provided in request body")
 	}
 
-	out.Expected = Expected{
-		Classification: test.Expected.Classification,
-		Blocked:        *test.Expected.Blocked,
-		StatusCode:     test.Expected.StatusCode,
-	}
 	out.Substrate.Image = sub.Image
 	// Embed the resolved rule and test so the result is self-contained.
 	out.Candidate = &cand
@@ -195,6 +190,10 @@ func executeScenario(ctx context.Context, req SubmitMitigationCheckRequest, runI
 	if cand.RuleID == "" {
 		cand.RuleID = waf.ruleID // reflected in out.Candidate (same value)
 	}
+	// The test request is the malicious case: a legitimate mitigation must block it.
+	// "expected" is derived here (not taken from the input); match is true only when
+	// the rule actually blocks (a genuine true positive).
+	out.Expected = Expected{Classification: "true-positive", Blocked: true, StatusCode: waf.status}
 	out.Steps = append(out.Steps, "parsed candidate SecRule id="+waf.ruleID+" (deny→"+strconv.Itoa(waf.status)+")")
 	if waf.clamped {
 		out.Limitations = append(out.Limitations,
@@ -259,8 +258,10 @@ func executeScenario(ctx context.Context, req SubmitMitigationCheckRequest, runI
 		out.TerminalState = stateNotBlocked
 	}
 
-	// 4. Actual vs expected.
-	out.Match = out.Actual.Blocked == out.Expected.Blocked
+	// 4. Verdict: a match is a genuine true positive — the rule blocked the
+	// malicious request. If it did not block (as it would a benign request), the
+	// mitigation is not proven, so match is false.
+	out.Match = out.Actual.Blocked
 	out.ProseSummary = summarize(out)
 	if test.ProofBasis == "mitigation-discriminator" && out.TerminalState == stateBlocked {
 		out.Limitations = append(out.Limitations, "indirect proof: only discriminator behavior was proven blocked (LLD §7.3)")

@@ -102,12 +102,14 @@ type CandidateSpec struct {
 	Action string `json:"action"`
 }
 
-// TestBasisSpec is the inline attack/discriminator sample and expected outcome.
+// TestBasisSpec is the inline attack/discriminator sample. The request is always
+// the malicious case: a working mitigation is expected to block it, so the verdict
+// derives "expected" internally rather than taking it from the input.
 type TestBasisSpec struct {
-	Kind       string       `json:"kind"`
-	ProofBasis string       `json:"proof_basis"`
-	Request    TestRequest  `json:"request"`
-	Expected   TestExpected `json:"expected"`
+	Kind       string        `json:"kind"`
+	ProofBasis string        `json:"proof_basis"`
+	Request    TestRequest   `json:"request"`
+	Expected   *TestExpected `json:"expected,omitempty"` // deprecated input; ignored by the verdict
 }
 
 type TestRequest struct {
@@ -521,9 +523,6 @@ func validate(req SubmitMitigationCheckRequest) []string {
 			// Proof basis must be one of the two admitted values (LLD §7.1).
 			if t.ProofBasis != "verified-vuln-artifact" && t.ProofBasis != "mitigation-discriminator" {
 				bad = append(bad, "test_basis.proof_basis")
-			}
-			if t.Expected.Blocked == nil {
-				bad = append(bad, "test_basis.expected.blocked")
 			}
 		}
 	}

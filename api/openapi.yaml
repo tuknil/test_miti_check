@@ -265,7 +265,11 @@ components:
 
     TestBasisSpec:
       type: object
-      required: [kind, proof_basis, expected]
+      required: [kind, proof_basis]
+      description: >
+        The malicious request a correct candidate must block. "expected" is not
+        part of the input — the verdict derives it (the test is the attack case)
+        and match is true only when the rule actually blocks (a true positive).
       properties:
         kind:
           type: string
@@ -275,8 +279,6 @@ components:
           enum: [verified-vuln-artifact, mitigation-discriminator]
         request:
           $ref: "#/components/schemas/TestRequest"
-        expected:
-          $ref: "#/components/schemas/TestExpected"
 
     TestRequest:
       type: object
@@ -344,7 +346,9 @@ components:
             type: string
         match:
           type: boolean
-          description: Whether actual.blocked equals expected.blocked.
+          description: >
+            True only for a genuine true positive: the rule blocked the malicious
+            request. False when it did not block (the mitigation is unproven).
         expected:
           $ref: "#/components/schemas/Outcome"
         actual:

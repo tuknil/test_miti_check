@@ -80,14 +80,8 @@ func TestTestBasisFromStimulus(t *testing.T) {
 	if tb.Request.Body != wantBody {
 		t.Errorf("body\n got %q\nwant %q", tb.Request.Body, wantBody)
 	}
-	if tb.Expected.Classification != "true-positive" {
-		t.Errorf("classification = %q", tb.Expected.Classification)
-	}
-	if tb.Expected.Blocked == nil || !*tb.Expected.Blocked {
-		t.Errorf("expected.blocked = %v, want true", tb.Expected.Blocked)
-	}
-	if tb.Expected.StatusCode != 403 {
-		t.Errorf("status_code = %d, want 403", tb.Expected.StatusCode)
+	if tb.Expected != nil {
+		t.Errorf("expected should not be emitted, got %+v", tb.Expected)
 	}
 
 	// The vulnerable marker must survive into the request body so a candidate can
