@@ -311,8 +311,9 @@ components:
     RunOutcome:
       type: object
       description: >
-        Result envelope (capability .. evidence_refs) with the full verdict detail
-        appended (match .. limitations).
+        Result envelope (capability .. evidence_refs) plus the verdict `match` and
+        the embedded rule/test. The expected/actual/substrate detail and the
+        execution diagnostics are computed but not returned or stored.
       properties:
         capability:
           type: string
@@ -349,12 +350,6 @@ components:
           description: >
             True only for a genuine true positive: the rule blocked the malicious
             request. False when it did not block (the mitigation is unproven).
-        expected:
-          $ref: "#/components/schemas/Outcome"
-        actual:
-          $ref: "#/components/schemas/ActualOutcome"
-        substrate:
-          $ref: "#/components/schemas/SubstrateInfo"
         candidate:
           allOf:
             - $ref: "#/components/schemas/CandidateSpec"
@@ -365,16 +360,6 @@ components:
           allOf:
             - $ref: "#/components/schemas/TestBasisSpec"
           description: The actual test that was run (embedded, same rationale).
-        steps:
-          type: array
-          items:
-            type: string
-        prose_summary:
-          type: string
-        limitations:
-          type: array
-          items:
-            type: string
 
     ResultRef:
       type: object
@@ -458,8 +443,6 @@ components:
         created_at:
           type: string
           format: date-time
-        summary:
-          type: string
 
     RunRecord:
       type: object

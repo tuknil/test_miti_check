@@ -30,9 +30,11 @@ import (
 	"time"
 )
 
-// RunOutcome is the executed result surfaced to the UI (a pragmatic superset of
-// MitigationCheckResult@1, LLD §10.2). The leading fields are the result envelope;
-// the trailing fields are the full verdict detail (appended, not replaced).
+// RunOutcome is the executed result. The serialized form (API response, Postgres
+// `response`, Databricks `result_json`) is the envelope plus `match` and the
+// embedded rule/test. Expected/Actual/Substrate and the diagnostics
+// (Steps/ProseSummary/Limitations) are computed during execution but excluded from
+// JSON (`json:"-"`) — they are used internally (e.g. to derive `match`), not stored.
 type RunOutcome struct {
 	Capability    string     `json:"capability"`
 	ContractID    string     `json:"contract_id"`
@@ -45,17 +47,17 @@ type RunOutcome struct {
 	EvidenceRefs  []string   `json:"evidence_refs"`
 
 	Match     bool     `json:"match"`
-	Expected  Expected `json:"expected"`
-	Actual    Actual   `json:"actual"`
-	Substrate SubInfo  `json:"substrate"`
+	Expected  Expected `json:"-"`
+	Actual    Actual   `json:"-"`
+	Substrate SubInfo  `json:"-"`
 	// Candidate and TestBasis carry the actual mitigation rule and the test that
 	// were run, so a mitigation_check row is self-contained — downstream consumers
 	// need not query the upstream tables the rule/test were sourced from.
 	Candidate    *CandidateSpec `json:"candidate,omitempty"`
 	TestBasis    *TestBasisSpec `json:"test_basis,omitempty"`
-	Steps        []string       `json:"steps"`
-	ProseSummary string         `json:"prose_summary"`
-	Limitations  []string       `json:"limitations,omitempty"`
+	Steps        []string       `json:"-"`
+	ProseSummary string         `json:"-"`
+	Limitations  []string       `json:"-"`
 }
 
 // ResultRef points at where the full result row is stored so another service can

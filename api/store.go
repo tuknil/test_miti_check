@@ -35,7 +35,6 @@ type RunSummary struct {
 	Match         bool      `json:"match"`
 	CorrelationID string    `json:"correlation_id,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
-	Summary       string    `json:"summary"`
 }
 
 type RunStore struct {
@@ -140,8 +139,7 @@ func (s *RunStore) Get(id string) (*RunRecord, bool) {
 func (s *RunStore) List() []RunSummary {
 	rows, err := s.db.Query(`
 		SELECT run_id, result_id, terminal_state, match, created_at,
-		       COALESCE(response->>'correlation_id', ''),
-		       COALESCE(response->>'prose_summary', '')
+		       COALESCE(response->>'correlation_id', '')
 		FROM mitigation_check_run
 		ORDER BY created_at DESC`)
 	if err != nil {
@@ -154,7 +152,7 @@ func (s *RunStore) List() []RunSummary {
 	for rows.Next() {
 		var s RunSummary
 		if err := rows.Scan(&s.RunID, &s.ResultID, &s.TerminalState, &s.Match,
-			&s.CreatedAt, &s.CorrelationID, &s.Summary); err != nil {
+			&s.CreatedAt, &s.CorrelationID); err != nil {
 			continue
 		}
 		out = append(out, s)

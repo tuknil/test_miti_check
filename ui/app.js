@@ -191,38 +191,12 @@ function outcomeHTML(o) {
   if (!o || !o.terminal_state) return `<div class="response idle">No result.</div>`;
   const cls = STATE_CLASS[o.terminal_state] || "warn";
   const matchBadge = o.match
-    ? '<span class="pill pill-ok">✓ actual matches expected</span>'
-    : '<span class="pill pill-err">✗ actual ≠ expected</span>';
-
-  const row = (label, exp, act) => `
-    <tr><th>${esc(label)}</th><td>${esc(exp)}</td>
-    <td class="${exp === act ? "" : "diff"}">${esc(act)}</td></tr>`;
-
-  const exp = o.expected || {};
-  const act = o.actual || {};
-  const sub = o.substrate || {};
-  const steps = (o.steps || []).map((s) => `<li>${esc(s)}</li>`).join("");
+    ? '<span class="pill pill-ok">✓ true positive — rule blocked</span>'
+    : '<span class="pill pill-err">✗ not blocked</span>';
 
   return `
     <div class="response ${cls}">
       <div class="verdict"><span class="state">${esc(o.terminal_state)}</span>${matchBadge}</div>
-      <p class="summary">${esc(o.prose_summary || "")}</p>
-      <table class="cmp">
-        <thead><tr><th></th><th>expected</th><th>actual</th></tr></thead>
-        <tbody>
-          ${row("blocked", exp.blocked, act.blocked)}
-          ${row("status_code", exp.status_code, act.status_code)}
-          ${row("reached app", false, act.reached_app)}
-          ${act.matched_rule_id ? `<tr><th>matched rule</th><td>—</td><td>${esc(act.matched_rule_id)}</td></tr>` : ""}
-        </tbody>
-      </table>
-      <p class="detail-line">${esc(act.detail || "")}</p>
-      <div class="substrate">substrate: ${esc(sub.image || "?")}${
-        sub.runner ? " · runner " + esc(sub.runner) : ""
-      }${sub.container_id ? " · " + esc(sub.container_id) : ""}${
-        sub.fqdn ? " · " + esc(sub.fqdn) : ""
-      }${sub.host_port ? " · :" + esc(sub.host_port) : ""} · ready=${!!sub.ready}</div>
-      <details><summary>execution steps</summary><ol>${steps}</ol></details>
       <details open><summary>full response JSON</summary><pre class="json-dump">${esc(JSON.stringify(o, null, 2))}</pre></details>
     </div>`;
 }
