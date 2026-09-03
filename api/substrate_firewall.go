@@ -46,15 +46,13 @@ func runFirewallInMemory(ctx context.Context, req SubmitMitigationCheckRequest, 
 	}
 	out.Candidate = &cand // embed the rule so the result is self-contained
 	var test FirewallTestBasis
-	if err := json.Unmarshal(nonNil(req.TestBasis), &test); err != nil || test.Expected.Blocked == nil {
-		return couldNotTest(out, "network-connection test / expected outcome not provided in request body")
+	if err := json.Unmarshal(nonNil(req.TestBasis), &test); err != nil {
+		return couldNotTest(out, "network-connection test not provided in request body")
 	}
 
-	out.Expected = Expected{
-		Classification: test.Expected.Classification,
-		Blocked:        *test.Expected.Blocked,
-		StatusCode:     test.Expected.StatusCode,
-	}
+	// The connection is the malicious case: a legitimate egress control must block
+	// it. "expected" is derived here, not taken from the input.
+	out.Expected = Expected{Classification: "true-positive", Blocked: true}
 	out.Substrate.Image = "network firewall (in-memory)"
 
 	fw, err := compileFirewallRule(cand)
@@ -87,7 +85,7 @@ func runFirewallInMemory(ctx context.Context, req SubmitMitigationCheckRequest, 
 		out.Steps = append(out.Steps, "no deny match -> connection allowed")
 	}
 
-	out.Match = out.Actual.Blocked == out.Expected.Blocked
+	out.Match = out.Actual.Blocked // true only when the rule blocks (true positive)
 	verdict := "BLOCKED"
 	if !out.Actual.Blocked {
 		verdict = "ALLOWED"

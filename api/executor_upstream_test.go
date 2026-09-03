@@ -105,8 +105,8 @@ func TestCheckGenerationRunResultToTestBasis(t *testing.T) {
 	if tb.Request.Body != wantBody {
 		t.Errorf("body\n got %q\nwant %q", tb.Request.Body, wantBody)
 	}
-	if tb.Expected.Classification != "true-positive" || tb.Expected.Blocked == nil || !*tb.Expected.Blocked {
-		t.Errorf("expected wrong: %+v", tb.Expected)
+	if tb.Expected != nil {
+		t.Errorf("expected should not be emitted, got %+v", tb.Expected)
 	}
 }
 

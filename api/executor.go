@@ -30,9 +30,11 @@ import (
 	"time"
 )
 
-// RunOutcome is the executed result surfaced to the UI (a pragmatic superset of
-// MitigationCheckResult@1, LLD §10.2). The leading fields are the result envelope;
-// the trailing fields are the full verdict detail (appended, not replaced).
+// RunOutcome is the executed result. The serialized form (API response, Postgres
+// `response`, Databricks `result_json`) is the envelope plus `match` and the
+// embedded rule/test. Expected/Actual/Substrate and the diagnostics
+// (Steps/ProseSummary/Limitations) are computed during execution but excluded from
+// JSON (`json:"-"`) — they are used internally (e.g. to derive `match`), not stored.
 type RunOutcome struct {
 	Capability    string     `json:"capability"`
 	ContractID    string     `json:"contract_id"`
@@ -45,17 +47,31 @@ type RunOutcome struct {
 	EvidenceRefs  []string   `json:"evidence_refs"`
 
 	Match     bool     `json:"match"`
-	Expected  Expected `json:"expected"`
-	Actual    Actual   `json:"actual"`
-	Substrate SubInfo  `json:"substrate"`
+	Expected  Expected `json:"-"`
+	Actual    Actual   `json:"-"`
+	Substrate SubInfo  `json:"-"`
 	// Candidate and TestBasis carry the actual mitigation rule and the test that
-	// were run, so a mitigation_check row is self-contained — downstream consumers
-	// need not query the upstream tables the rule/test were sourced from.
-	Candidate    *CandidateSpec `json:"candidate,omitempty"`
-	TestBasis    *TestBasisSpec `json:"test_basis,omitempty"`
-	Steps        []string       `json:"steps"`
-	ProseSummary string         `json:"prose_summary"`
-	Limitations  []string       `json:"limitations,omitempty"`
+	// were run. They are written to the databases (Postgres `response`, Databricks
+	// `result_json` via storedResultJSON) so a mitigation_check row is
+	// self-contained, but are json:"-" here so they are NOT returned by the API —
+	// a consumer that needs them queries the row via result_ref.
+	Candidate    *CandidateSpec `json:"-"`
+	TestBasis    *TestBasisSpec `json:"-"`
+	Steps        []string       `json:"-"`
+	ProseSummary string         `json:"-"`
+	Limitations  []string       `json:"-"`
+}
+
+// storedResultJSON marshals the outcome for the databases: the same JSON the API
+// returns, plus the embedded candidate (rule) and test_basis that the API omits.
+// A consumer reads these from the row via result_ref.
+func storedResultJSON(o RunOutcome) ([]byte, error) {
+	type envelope RunOutcome // reuses o's json tags (candidate/test_basis are "-")
+	return json.Marshal(struct {
+		envelope
+		Candidate *CandidateSpec `json:"candidate,omitempty"`
+		TestBasis *TestBasisSpec `json:"test_basis,omitempty"`
+	}{envelope(o), o.Candidate, o.TestBasis})
 }
 
 // ResultRef points at where the full result row is stored so another service can
@@ -107,7 +123,7 @@ const (
 
 // Execution modes select which substrate adapter brings up the target.
 const (
-	execLocal      = "local"       // docker on the host daemon (docker.sock)
+	execLocal      = "local"       // host Docker; used only by the GitHub-runner CLI, not API-selectable
 	execInMemory   = "inmemory"    // in-process target inside the API; no external deps
 	execACI        = "aci"         // Azure Container Instances via DefaultAzureCredential
 	execACISP      = "aci-sp"      // Azure Container Instances via a service principal (env)
@@ -162,15 +178,10 @@ func executeScenario(ctx context.Context, req SubmitMitigationCheckRequest, runI
 	if err := json.Unmarshal(nonNil(req.Candidate), &cand); err != nil || cand.Rule == "" {
 		return couldNotTest(out, "candidate WAF rule not provided in request body")
 	}
-	if err := json.Unmarshal(nonNil(req.TestBasis), &test); err != nil || test.Expected.Blocked == nil {
-		return couldNotTest(out, "test basis / expected outcome not provided in request body")
+	if err := json.Unmarshal(nonNil(req.TestBasis), &test); err != nil {
+		return couldNotTest(out, "test basis not provided in request body")
 	}
 
-	out.Expected = Expected{
-		Classification: test.Expected.Classification,
-		Blocked:        *test.Expected.Blocked,
-		StatusCode:     test.Expected.StatusCode,
-	}
 	out.Substrate.Image = sub.Image
 	// Embed the resolved rule and test so the result is self-contained.
 	out.Candidate = &cand
@@ -195,6 +206,10 @@ func executeScenario(ctx context.Context, req SubmitMitigationCheckRequest, runI
 	if cand.RuleID == "" {
 		cand.RuleID = waf.ruleID // reflected in out.Candidate (same value)
 	}
+	// The test request is the malicious case: a legitimate mitigation must block it.
+	// "expected" is derived here (not taken from the input); match is true only when
+	// the rule actually blocks (a genuine true positive).
+	out.Expected = Expected{Classification: "true-positive", Blocked: true, StatusCode: waf.status}
 	out.Steps = append(out.Steps, "parsed candidate SecRule id="+waf.ruleID+" (deny→"+strconv.Itoa(waf.status)+")")
 	if waf.clamped {
 		out.Limitations = append(out.Limitations,
@@ -259,8 +274,10 @@ func executeScenario(ctx context.Context, req SubmitMitigationCheckRequest, runI
 		out.TerminalState = stateNotBlocked
 	}
 
-	// 4. Actual vs expected.
-	out.Match = out.Actual.Blocked == out.Expected.Blocked
+	// 4. Verdict: a match is a genuine true positive — the rule blocked the
+	// malicious request. If it did not block (as it would a benign request), the
+	// mitigation is not proven, so match is false.
+	out.Match = out.Actual.Blocked
 	out.ProseSummary = summarize(out)
 	if test.ProofBasis == "mitigation-discriminator" && out.TerminalState == stateBlocked {
 		out.Limitations = append(out.Limitations, "indirect proof: only discriminator behavior was proven blocked (LLD §7.3)")

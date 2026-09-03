@@ -37,15 +37,14 @@ type Stimulus struct {
 	BaselinePredicate   string            `json:"baseline_predicate"`
 }
 
-// TestBasisFromStimulus builds the true-positive TestBasisSpec from a stimulus:
-// the vulnerable/attack request, expected to be blocked (403) by a correct
-// candidate.
+// TestBasisFromStimulus builds a TestBasisSpec from a stimulus: the malicious
+// request a correct candidate must block. "expected" is not emitted — the verdict
+// derives it (the test is always the attack case).
 func TestBasisFromStimulus(s Stimulus) (TestBasisSpec, error) {
 	body, err := stimulusBody(s)
 	if err != nil {
 		return TestBasisSpec{}, err
 	}
-	blocked := true
 	return TestBasisSpec{
 		Kind:       firstNonEmpty(s.ArtifactType, "http-probe"),
 		ProofBasis: "verified-vuln-artifact",
@@ -54,11 +53,6 @@ func TestBasisFromStimulus(s Stimulus) (TestBasisSpec, error) {
 			Path:    stimulusPath(s.PathKey, s.Query),
 			Headers: stimulusHeaders(s),
 			Body:    body,
-		},
-		Expected: TestExpected{
-			Classification: "true-positive",
-			Blocked:        &blocked,
-			StatusCode:     403,
 		},
 	}, nil
 }

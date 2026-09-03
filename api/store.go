@@ -33,8 +33,8 @@ type RunSummary struct {
 	ResultID      string    `json:"result_id"`
 	TerminalState string    `json:"terminal_state"`
 	Match         bool      `json:"match"`
+	CorrelationID string    `json:"correlation_id,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
-	Summary       string    `json:"summary"`
 }
 
 type RunStore struct {
@@ -97,10 +97,10 @@ func (s *RunStore) Close() {
 	}
 }
 
-// Add durably records a run. request is stored as-is (JSONB); response is
-// marshaled to JSONB.
+// Add durably records a run. request is stored as-is (JSONB); response is stored
+// via storedResultJSON (the API body plus the embedded candidate/test_basis).
 func (s *RunStore) Add(r *RunRecord) error {
-	resp, err := json.Marshal(r.Response)
+	resp, err := storedResultJSON(r.Response)
 	if err != nil {
 		return err
 	}
@@ -139,7 +139,7 @@ func (s *RunStore) Get(id string) (*RunRecord, bool) {
 func (s *RunStore) List() []RunSummary {
 	rows, err := s.db.Query(`
 		SELECT run_id, result_id, terminal_state, match, created_at,
-		       COALESCE(response->>'prose_summary', '')
+		       COALESCE(response->>'correlation_id', '')
 		FROM mitigation_check_run
 		ORDER BY created_at DESC`)
 	if err != nil {
@@ -152,7 +152,7 @@ func (s *RunStore) List() []RunSummary {
 	for rows.Next() {
 		var s RunSummary
 		if err := rows.Scan(&s.RunID, &s.ResultID, &s.TerminalState, &s.Match,
-			&s.CreatedAt, &s.Summary); err != nil {
+			&s.CreatedAt, &s.CorrelationID); err != nil {
 			continue
 		}
 		out = append(out, s)

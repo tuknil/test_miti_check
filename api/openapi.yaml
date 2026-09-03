@@ -62,11 +62,19 @@ paths:
                       status_code: 403
       responses:
         "200":
-          description: Run executed; terminal state resolved.
+          description: Run executed synchronously; terminal state resolved.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/RunOutcome"
+        "202":
+          description: >
+            Async mode (env MC_ASYNC) for an in-memory run: accepted and queued.
+            Poll /v1/mitigation-check-run-status with the returned run_id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueuedRunResponse"
         "400":
           description: Request does not satisfy the contract.
           content:
@@ -111,6 +119,31 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
 
+  /v1/mitigation-check-run-status:
+    post:
+      summary: Check the status of a run (for async execution)
+      description: >
+        In async mode (env MC_ASYNC) an in-memory POST returns status "queued" and
+        runs in the background. This endpoint looks the run up by run_id in Postgres
+        then Databricks: if the result is stored the run has completed and the full
+        response is returned with status "completed"; otherwise status is "running".
+      operationId: checkRunStatus
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StatusCheckRequest"
+      responses:
+        "200":
+          description: Completed (RunOutcome with status "completed") or still running.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/RunOutcome"
+                  - $ref: "#/components/schemas/QueuedRunResponse"
+
   /healthz:
     get:
       summary: Liveness probe
@@ -154,11 +187,10 @@ components:
           description: Logical bounded, non-production substrate (optional).
         execution_mode:
           type: string
-          enum: [local, inmemory, firewall, aci, aci-sp, github, github-ghcr]
+          enum: [inmemory, firewall, aci, aci-sp, github, github-ghcr]
           default: inmemory
           description: >
             Substrate adapter (defaults to "inmemory" when omitted).
-            "local" runs the target on the host Docker daemon;
             "inmemory" runs an in-process stand-in target inside the API (no Docker/cloud);
             "firewall" evaluates an L3/L4 firewall rule against a network-connection
             test in-process (no substrate);
@@ -266,7 +298,11 @@ components:
 
     TestBasisSpec:
       type: object
-      required: [kind, proof_basis, expected]
+      required: [kind, proof_basis]
+      description: >
+        The malicious request a correct candidate must block. "expected" is not
+        part of the input — the verdict derives it (the test is the attack case)
+        and match is true only when the rule actually blocks (a true positive).
       properties:
         kind:
           type: string
@@ -276,8 +312,6 @@ components:
           enum: [verified-vuln-artifact, mitigation-discriminator]
         request:
           $ref: "#/components/schemas/TestRequest"
-        expected:
-          $ref: "#/components/schemas/TestExpected"
 
     TestRequest:
       type: object
@@ -310,8 +344,12 @@ components:
     RunOutcome:
       type: object
       description: >
-        Result envelope (capability .. evidence_refs) with the full verdict detail
-        appended (match .. limitations).
+        Result envelope (capability .. evidence_refs) plus the verdict `match`.
+        The candidate (rule) and test_basis are NOT returned by the API — they are
+        stored in the databases (Databricks result_json / Postgres response); a
+        consumer that needs them queries the row via result_ref. The
+        expected/actual/substrate detail and execution diagnostics are computed but
+        neither returned nor stored.
       properties:
         capability:
           type: string
@@ -345,33 +383,9 @@ components:
             type: string
         match:
           type: boolean
-          description: Whether actual.blocked equals expected.blocked.
-        expected:
-          $ref: "#/components/schemas/Outcome"
-        actual:
-          $ref: "#/components/schemas/ActualOutcome"
-        substrate:
-          $ref: "#/components/schemas/SubstrateInfo"
-        candidate:
-          allOf:
-            - $ref: "#/components/schemas/CandidateSpec"
           description: >
-            The actual mitigation rule that was run (embedded so a mitigation_check
-            row is self-contained; consumers need not query the upstream table).
-        test_basis:
-          allOf:
-            - $ref: "#/components/schemas/TestBasisSpec"
-          description: The actual test that was run (embedded, same rationale).
-        steps:
-          type: array
-          items:
-            type: string
-        prose_summary:
-          type: string
-        limitations:
-          type: array
-          items:
-            type: string
+            True only for a genuine true positive: the rule blocked the malicious
+            request. False when it did not block (the mitigation is unproven).
 
     ResultRef:
       type: object
@@ -438,6 +452,37 @@ components:
         ready:
           type: boolean
 
+    QueuedRunResponse:
+      type: object
+      description: Async POST acknowledgement / status-check "running" response.
+      properties:
+        capability:
+          type: string
+          enum: ["mitigation-check"]
+        contract_id:
+          type: string
+          enum: ["mitigation-check@1.0"]
+        run_id:
+          type: string
+        correlation_id:
+          type: string
+        status:
+          type: string
+          enum: [queued, running]
+
+    StatusCheckRequest:
+      type: object
+      required: [run_id]
+      properties:
+        capability:
+          type: string
+        contract_id:
+          type: string
+        run_id:
+          type: string
+        correlation_id:
+          type: string
+
     RunSummary:
       type: object
       properties:
@@ -449,11 +494,12 @@ components:
           type: string
         match:
           type: boolean
+        correlation_id:
+          type: string
+          description: Echoed from the request; omitted when not supplied.
         created_at:
           type: string
           format: date-time
-        summary:
-          type: string
 
     RunRecord:
       type: object

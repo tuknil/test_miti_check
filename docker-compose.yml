@@ -1,10 +1,10 @@
 # mitigation-check: UI + API + Postgres as containers.
 #
-# The API launches the validation-substrate container on the host Docker daemon
-# (mounted docker.sock) and attaches it to the shared `mitigation-net` network,
-# reaching it by name. The run ledger lives in the `db` Postgres container; its
-# data is on the named volume `pgdata`, which survives `docker stop` and
-# `docker rm` of the db container (only `docker compose down -v` deletes it).
+# The API executes scenarios in-process (mode "inmemory") or delegates to Azure
+# ACI / GitHub Actions — no host Docker daemon is required. The run ledger lives
+# in the `db` Postgres container; its data is on the named volume `pgdata`, which
+# survives `docker stop` and `docker rm` of the db container (only
+# `docker compose down -v` deletes it).
 
 services:
   db:
@@ -33,7 +33,9 @@ services:
       PORT: "8137"
       GODEBUG: x509negativeserial=1
       DATABASE_URL: postgres://mc:mc@db:5432/mitigation?sslmode=disable
-      MC_SUBSTRATE_NETWORK: mitigation-net
+      # Async execution for in-memory scenarios (POST returns queued; poll the
+      # status endpoint). Unset = synchronous.
+      MC_ASYNC: ${MC_ASYNC:-}
       # Azure ACI execution mode (optional).
       AZURE_SUBSCRIPTION_ID: ${AZURE_SUBSCRIPTION_ID:-}
       MC_ACI_RESOURCE_GROUP: ${MC_ACI_RESOURCE_GROUP:-}
@@ -51,8 +53,6 @@ services:
       DATABRICKS_TABLE: ${DATABRICKS_TABLE:-}
     ports:
       - "8137:8137"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock    # launch substrate containers
     depends_on:
       db:
         condition: service_healthy
