@@ -448,6 +448,9 @@ components:
           type: string
         match:
           type: boolean
+        correlation_id:
+          type: string
+          description: Echoed from the request; omitted when not supplied.
         created_at:
           type: string
           format: date-time
