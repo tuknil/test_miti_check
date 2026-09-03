@@ -107,7 +107,7 @@ const (
 
 // Execution modes select which substrate adapter brings up the target.
 const (
-	execLocal      = "local"       // docker on the host daemon (docker.sock)
+	execLocal      = "local"       // host Docker; used only by the GitHub-runner CLI, not API-selectable
 	execInMemory   = "inmemory"    // in-process target inside the API; no external deps
 	execACI        = "aci"         // Azure Container Instances via DefaultAzureCredential
 	execACISP      = "aci-sp"      // Azure Container Instances via a service principal (env)

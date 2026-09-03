@@ -476,8 +476,10 @@ func validate(req SubmitMitigationCheckRequest) []string {
 	}
 	// substrate_selector is optional (LLD §10.1) — no constraint.
 
-	// execution_mode is optional; when set it must be a known adapter.
-	if m := req.ExecutionMode; m != "" && m != execLocal && m != execInMemory && m != execACI && m != execACISP && m != execGitHub && m != execGitHubGHCR && m != execFirewall {
+	// execution_mode is optional; when set it must be a known adapter. "local"
+	// (host Docker) is not selectable via the API — it is not feasible on ACA and
+	// is used only internally by the GitHub-runner CLI path.
+	if m := req.ExecutionMode; m != "" && m != execInMemory && m != execACI && m != execACISP && m != execGitHub && m != execGitHubGHCR && m != execFirewall {
 		bad = append(bad, "execution_mode")
 	}
 

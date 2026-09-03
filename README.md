@@ -41,22 +41,19 @@ substrate adapter, §6.5 verdict engine):
 5. **Tear down** the container (`--rm`).
 
 The response returns the terminal state plus **actual vs expected** and an
-execution step log. Requires a running Docker daemon; without one the run
-returns `could-not-test` with a reason.
+execution step log. By default the scenario executes **in-process** (`inmemory`),
+so no Docker daemon is required; other modes delegate to Azure ACI or GitHub.
 
 > The WAF faithfully enforces the *specific* SecRule shipped in the candidate
 > (pattern, targets, deny/status). It is not the full ModSecurity engine —
 > swapping in a real ModSecurity container is an adapter change behind the same
 > flow.
 
-### Execution mode: local Docker vs Azure ACI
+### Execution modes
 
-The substrate can be brought up two ways, selected by the **Execution mode**
-toggle in the UI (or `execution_mode` in the request: `local` | `aci`). Only the
-bring-up/teardown differs — the WAF, test, and verdict are identical.
-
-- **`local`** — `docker run` on the host daemon (`docker.sock`). What
-  Docker Compose uses.
+The substrate can be brought up several ways, selected by the **Execution mode**
+toggle in the UI (or `execution_mode` in the request). Only the bring-up/teardown
+differs — the WAF, test, and verdict are identical.
 
 - **`inmemory`** (**default** when the request omits `execution_mode`) — runs the whole scenario **inside the API process**: the target
   is an in-process HTTP stand-in (started on a loopback port), with the same
@@ -64,7 +61,7 @@ bring-up/teardown differs — the WAF, test, and verdict are identical.
   network** — so it runs anywhere (including ACA) and completes in milliseconds.
   Fidelity trade-off: the target is a stand-in, not the real CVE image, so it
   validates the **rule logic**, not the real vulnerable binary (a weaker proof
-  than `local`/`aci`). Great for fast rule iteration and CI. Because the target is
+  than `aci`). Great for fast rule iteration and CI. Because the target is
   a stand-in, the request may **omit `substrate` entirely** in this mode (the
   result records `image: "(no substrate provided)"`); every other mode still
   requires `substrate.image` and returns `could-not-test` without it.
@@ -157,15 +154,15 @@ bring-up/teardown differs — the WAF, test, and verdict are identical.
   `read:packages` (pull). A private source registry is authenticated from
   `MC_ACI_REGISTRY_*` / `JFROG_*` env. The relayed package stays **private**.
 
-### Which modes run on Azure Container Apps (no docker.sock)
+### All modes run on Azure Container Apps (no host Docker)
 
-| Mode | Runs on ACA? | Why |
-|---|---|---|
-| `inmemory` | ✅ | in-process |
-| `aci` / `aci-sp` | ✅ | Azure API, no local Docker |
-| `github` | ✅ | just dispatches over HTTP; substrate runs on the runner |
-| `github-ghcr` | ✅ | daemonless relay + HTTP dispatch |
-| `local` | ❌ | needs the host Docker socket (local dev only) |
+| Mode | How |
+|---|---|
+| `inmemory` | in-process |
+| `aci` / `aci-sp` | Azure API, no local Docker |
+| `github` | just dispatches over HTTP; substrate runs on the runner |
+| `github-ghcr` | daemonless relay + HTTP dispatch |
+| `firewall` | in-process L3/L4 evaluation |
 
 ## Step 3 — Run ledger
 
@@ -295,17 +292,10 @@ editable for manual override). For ACA, set `API_BASE` to the API app's public F
 
 Then stop with `docker compose down` (keep `-v` off to preserve the ledger).
 
-**Requires the host Docker socket.** The API launches the validation-substrate
-container on the host daemon (`/var/run/docker.sock` is mounted) and attaches it
-to the shared `mitigation-net` network, reaching it by container name — so the
-containerized API can bring up substrates just like the local build.
-
-### Ledger durability
-
-The run ledger is stored on the named volume `ledger-data` (mounted at
-`/app/data`). It **survives `docker stop` and `docker rm`** of the API container —
-recreate the container and past runs reload automatically. Only
-`docker compose down -v` deletes the volume.
+**No host Docker daemon required.** The API executes scenarios in-process
+(`inmemory`) or delegates to Azure ACI / GitHub Actions, and runs as a non-root
+user. The run ledger lives in the `db` Postgres container (durable on the `pgdata`
+volume across `docker stop`/`docker rm`, as above).
 
 ## Run it — local (without Docker for the app itself)
 
@@ -322,8 +312,7 @@ cd ui && python3 -m http.server 5501
 ```
 
 Open http://localhost:5501 and set the "API base URL" field to match the API
-port (e.g. `http://localhost:8137`). In local mode the substrate is published on
-`127.0.0.1:<free-port>` instead of the shared network.
+port (e.g. `http://localhost:8137`).
 
 ## Verify the API directly
 
