@@ -51,13 +51,27 @@ type RunOutcome struct {
 	Actual    Actual   `json:"-"`
 	Substrate SubInfo  `json:"-"`
 	// Candidate and TestBasis carry the actual mitigation rule and the test that
-	// were run, so a mitigation_check row is self-contained — downstream consumers
-	// need not query the upstream tables the rule/test were sourced from.
-	Candidate    *CandidateSpec `json:"candidate,omitempty"`
-	TestBasis    *TestBasisSpec `json:"test_basis,omitempty"`
+	// were run. They are written to the databases (Postgres `response`, Databricks
+	// `result_json` via storedResultJSON) so a mitigation_check row is
+	// self-contained, but are json:"-" here so they are NOT returned by the API —
+	// a consumer that needs them queries the row via result_ref.
+	Candidate    *CandidateSpec `json:"-"`
+	TestBasis    *TestBasisSpec `json:"-"`
 	Steps        []string       `json:"-"`
 	ProseSummary string         `json:"-"`
 	Limitations  []string       `json:"-"`
+}
+
+// storedResultJSON marshals the outcome for the databases: the same JSON the API
+// returns, plus the embedded candidate (rule) and test_basis that the API omits.
+// A consumer reads these from the row via result_ref.
+func storedResultJSON(o RunOutcome) ([]byte, error) {
+	type envelope RunOutcome // reuses o's json tags (candidate/test_basis are "-")
+	return json.Marshal(struct {
+		envelope
+		Candidate *CandidateSpec `json:"candidate,omitempty"`
+		TestBasis *TestBasisSpec `json:"test_basis,omitempty"`
+	}{envelope(o), o.Candidate, o.TestBasis})
 }
 
 // ResultRef points at where the full result row is stored so another service can

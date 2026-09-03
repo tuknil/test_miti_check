@@ -19,7 +19,6 @@ package main
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"log"
 	"os"
 	"strings"
@@ -65,7 +64,7 @@ func (s *DatabricksSink) Write(ctx context.Context, outcome RunOutcome) error {
 	if s == nil {
 		return nil
 	}
-	payload, err := json.Marshal(outcome)
+	payload, err := storedResultJSON(outcome)
 	if err != nil {
 		log.Printf("databricks: WRITE FAILED (run %s): marshal: %v", outcome.RunID, err)
 		return err

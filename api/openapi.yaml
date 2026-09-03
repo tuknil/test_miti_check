@@ -311,9 +311,12 @@ components:
     RunOutcome:
       type: object
       description: >
-        Result envelope (capability .. evidence_refs) plus the verdict `match` and
-        the embedded rule/test. The expected/actual/substrate detail and the
-        execution diagnostics are computed but not returned or stored.
+        Result envelope (capability .. evidence_refs) plus the verdict `match`.
+        The candidate (rule) and test_basis are NOT returned by the API — they are
+        stored in the databases (Databricks result_json / Postgres response); a
+        consumer that needs them queries the row via result_ref. The
+        expected/actual/substrate detail and execution diagnostics are computed but
+        neither returned nor stored.
       properties:
         capability:
           type: string
@@ -350,16 +353,6 @@ components:
           description: >
             True only for a genuine true positive: the rule blocked the malicious
             request. False when it did not block (the mitigation is unproven).
-        candidate:
-          allOf:
-            - $ref: "#/components/schemas/CandidateSpec"
-          description: >
-            The actual mitigation rule that was run (embedded so a mitigation_check
-            row is self-contained; consumers need not query the upstream table).
-        test_basis:
-          allOf:
-            - $ref: "#/components/schemas/TestBasisSpec"
-          description: The actual test that was run (embedded, same rationale).
 
     ResultRef:
       type: object

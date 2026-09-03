@@ -97,10 +97,10 @@ func (s *RunStore) Close() {
 	}
 }
 
-// Add durably records a run. request is stored as-is (JSONB); response is
-// marshaled to JSONB.
+// Add durably records a run. request is stored as-is (JSONB); response is stored
+// via storedResultJSON (the API body plus the embedded candidate/test_basis).
 func (s *RunStore) Add(r *RunRecord) error {
-	resp, err := json.Marshal(r.Response)
+	resp, err := storedResultJSON(r.Response)
 	if err != nil {
 		return err
 	}
