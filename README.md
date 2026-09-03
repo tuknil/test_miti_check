@@ -4,6 +4,61 @@ A stepwise prototype of the `mitigation-check@1.0` capability (see
 [mitigation-check-lld.md](mitigation-check-lld.md)), built as a **separate UI and
 Go API server**.
 
+## Durable asynchronous lifecycle
+
+The canonical orchestration API persists a queued PostgreSQL ledger row before
+returning `202 Accepted`:
+
+- `POST /v1/mitigation-check-runs`
+- `GET /v1/mitigation-check-runs/{run_id}`
+- `GET /v1/mitigation-check-runs/{run_id}/result`
+- `POST /v1/mitigation-check-runs/{run_id}/cancel`
+
+Submission requires `Idempotency-Key` and `X-Correlation-ID`. The body
+`request_id` may be omitted during migration and is then populated from
+`Idempotency-Key`; when present it must match. Body `correlation_id` may likewise
+be populated from `X-Correlation-ID` and must match when present. Semantically
+identical retries return the existing run, while a different normalized request
+under the same key returns `409 idempotency_conflict`.
+
+An in-process worker atomically leases queued work, heartbeats running work, and
+recovers expired leases with a bounded attempt count. Every claim has a unique
+lease token; heartbeats, staging, publication, completion, failure, and
+cancellation are fenced by that token. Heartbeat errors or ownership loss cancel
+the active executor. If a worker disappears during cancellation, lease-expiry
+recovery completes the transition to `canceled`.
+
+The accepted contract is always `mitigation-check@1.0`, independent of
+`MC_INPUT_UPSTREAM`. Canonical requests may carry inline artifacts,
+`upstream_inputs`, or both. Upstream resolution is selected only when configured
+and `upstream_inputs` is present. Omitted `execution_mode`, request method,
+request path, and request headers are normalized to `inmemory`, `GET`, `/`, and
+an empty object before the idempotency digest is calculated.
+
+Completed results are staged in PostgreSQL before external publication. The
+Databricks writer uses an insert-only `MERGE` keyed by `result_id`, then reads the
+row back and requires exact `run_id` and JSON equality. Recovery republishes the
+same staged bytes and never reruns the check. A completed response advertises a
+Databricks `result_ref` only when a fully qualified destination is configured and
+publication succeeds; otherwise the run fails without a fabricated reference.
+The immutable result includes the normalized request digest, exact upstream
+result identities, and deduplicated upstream evidence references used by the
+check.
+
+Callbacks are deferred and disabled. A request containing `callback` returns
+`400 callbacks_disabled`; orchestration must poll status and result endpoints.
+Errors from the canonical lifecycle endpoints are root objects containing
+`code`, `detail`, and `retryable`. Submission accepts only the
+`application/json` media type (parameters such as `charset` are allowed).
+
+Valid transitions are `queued -> running -> completed|failed|canceled`,
+`queued -> canceled`, `running -> queued` for a fenced publication retry, and
+expired `running -> failed|canceled` during recovery. Terminal states are
+immutable.
+
+The existing executor and UI remain available through the clearly separate,
+deprecated synchronous path `POST /v1/compat/mitigation-check-runs`.
+
 ## Step 1 — Submit a mitigation-check run
 
 Scope: create a mitigation scenario aligned with the input contract, render a
@@ -190,14 +245,15 @@ runs are **durable across `docker stop` and `docker rm` of the db container** �
 recreate it and the data is intact; the API's connection pool reconnects
 automatically. Only `docker compose down -v` deletes the volume.
 
-**Optional secondary sink — Databricks.** Besides Postgres, each result is also
-written to a Databricks Delta table. The `result_id` column stores the run's full
+**Authoritative result sink — Databricks.** A canonical async completion is
+published to a Databricks Delta table. The `result_id` column stores the run's full
 `result_id` value (`mitigation-check-result:<hex>`), and the
 [result envelope](#result-envelope)'s `result_ref.key` reports that same value, so
-a consumer can `SELECT … WHERE result_id = '<value>'`. The write is **synchronous** so the envelope's
-`status` reflects it — a failure never changes `terminal_state` (still the test
-result) or fails the run, but degrades `status` to `storage-failed`. Disabled
-unless `DATABRICKS_DSN` is set. Config (put the DSN, which carries a token, in
+a consumer can `SELECT … WHERE result_id = '<value>'`. Publication is an
+insert-only, idempotent `MERGE` with exact read-back verification. A transient
+failure retries the staged result under a new fenced lease; exhaustion or an
+unconfigured sink fails the run without returning a Databricks reference. Config
+(put the DSN, which carries a token, in
 `.env` — never in `docker-compose.yml`):
 
 ```
@@ -210,8 +266,8 @@ DATABRICKS_TABLE=mitigation_check
 Target table:
 `mitigation_check(run_id string, result_id string, result_json STRING, primary key(run_id, result_id))`.
 The host must be reachable from the API and the workspace's IP access list must
-allow it (a `403 "Unauthorized network access"` means the API's egress IP isn't
-allowlisted — the run still returns, with `status: "storage-failed"`).
+allow it. A `403 "Unauthorized network access"` means the API's authorized route
+or workspace access configuration must be corrected.
 
 ### Result envelope
 
@@ -241,8 +297,10 @@ need not query the upstream table the rule was sourced from:
 
 - `terminal_state` — the test result (`blocked` / `not-blocked` / `could-not-test`
   / `scope-declined` / `malfunction`).
-- `status` — workflow status: `completed`; `storage-failed` if the Databricks
-  write failed; `failed` if the run malfunctioned.
+- `status` — canonical async lifecycle status. `completed` is exposed only after
+  authoritative Databricks publication; `failed` includes a stable failure
+  envelope. The deprecated synchronous compatibility path may still report its
+  legacy `storage-failed` value.
 - `correlation_id` — echoed from the request when supplied (optional).
 - `result_ref` — points at the Databricks row for this result. `key` is the
   `result_id` value itself (the same string in the top-level `result_id` and in
@@ -272,9 +330,8 @@ it is derived from the `check-generation` entry. The resolved rule/test are fed 
 the shared executor, so bring-up / WAF / verdict are identical to the default path.
 A read/parse failure yields `could-not-test` (never a fabricated verdict); a
 missing `defense-generation` entry is `could-not-test` (no rule).
-- Upstream mode is the default; set `MC_INPUT_UPSTREAM=0` to run the legacy
-  executor (inline `candidate`). Both accept `contract_id: "mitigation-check@1.0"`;
-  upstream mode also accepts the upstream `"defense-generation@1.0"`.
+- Upstream mode is the default; set `MC_INPUT_UPSTREAM=0` to run only the inline
+  executor. Both paths require canonical `contract_id: "mitigation-check@1.0"`.
 
 ## Run it — Docker (recommended)
 

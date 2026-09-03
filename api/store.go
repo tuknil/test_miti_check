@@ -4,7 +4,9 @@ package main
 // by a PostgreSQL database (run as its own container via docker compose). Data
 // durability is a property of the db container's volume, not this process.
 //
-// The immutable request and the executed response are stored as JSONB columns.
+// The immutable request and parsed response projection are stored as JSONB.
+// Async lifecycle rows additionally retain exact canonical result bytes in
+// result_payload so recovery and authoritative publication never reserialize.
 
 import (
 	"database/sql"
@@ -76,6 +78,10 @@ func NewRunStore(dsn string) (*RunStore, error) {
 		)`); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("create schema: %w", err)
+	}
+	if err := migrateLifecycle(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate lifecycle schema: %w", err)
 	}
 
 	s := &RunStore{db: db}

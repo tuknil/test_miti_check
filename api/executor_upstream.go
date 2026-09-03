@@ -54,10 +54,11 @@ func (r upstreamRef) qualified() string {
 }
 
 type upstreamInput struct {
-	Capability string      `json:"capability"`
-	ContractID string      `json:"contract_id"`
-	ResultID   string      `json:"result_id"`
-	ResultRef  upstreamRef `json:"result_ref"`
+	Capability   string      `json:"capability"`
+	ContractID   string      `json:"contract_id"`
+	ResultID     string      `json:"result_id"`
+	ResultRef    upstreamRef `json:"result_ref"`
+	EvidenceRefs []string    `json:"evidence_refs"`
 }
 
 // executeScenarioUpstream resolves the rule (and, when needed, the test) from
@@ -94,8 +95,9 @@ func executeScenarioUpstream(ctx context.Context, req SubmitMitigationCheckReque
 	if b, e := json.Marshal(cand); e == nil {
 		req.Candidate = b
 	}
-	log.Printf("upstream: derived rule (kind=%s engine=%s action=%s candidate_id=%s): %s",
-		cand.Kind, cand.Engine, cand.Action, pc.CandidateID, cand.Rule)
+	logLifecycle("upstream_candidate_resolved", lifecycleIdentity(req, runID, resultID), map[string]any{
+		"candidate_kind": cand.Kind, "candidate_engine": cand.Engine, "candidate_action": cand.Action, "candidate_id": pc.CandidateID,
+	})
 	// A firewall candidate runs on the separate firewall evaluator, not the WAF path.
 	if cand.Kind == "firewall-rule" && req.ExecutionMode != execFirewall {
 		req.ExecutionMode = execFirewall
@@ -124,7 +126,7 @@ func executeScenarioUpstream(ctx context.Context, req SubmitMitigationCheckReque
 			}
 			if b, e := json.Marshal(tb); e == nil {
 				req.TestBasis = b
-				log.Printf("upstream: derived test_basis from check-generation: %s", string(b))
+				logLifecycle("upstream_test_basis_resolved", lifecycleIdentity(req, runID, resultID), nil)
 			}
 			steps = append(steps, "derived test_basis from check-generation run_result "+
 				checkEntry.ResultRef.qualified()+" where result_id="+checkEntry.ResultRef.Key)
@@ -134,6 +136,10 @@ func executeScenarioUpstream(ctx context.Context, req SubmitMitigationCheckReque
 	out := executeScenario(ctx, req, runID, resultID)
 	out.Steps = append(steps, out.Steps...)
 	return out
+}
+
+func lifecycleIdentity(req SubmitMitigationCheckRequest, runID, resultID string) DurableRun {
+	return DurableRun{RunStatus: RunStatus{RequestID: req.RequestID, CorrelationID: req.CorrelationID, RunID: runID, ResultID: &resultID, Status: statusRunning}}
 }
 
 // candidateKind classifies the rule as "waf-rule" or "firewall-rule" from the

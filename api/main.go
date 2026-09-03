@@ -42,6 +42,7 @@ const maxBodyBytes = 64 * 1024
 // content (container image, WAF rule, attack test) so a run is self-describing.
 type SubmitMitigationCheckRequest struct {
 	ContractID          string          `json:"contract_id"`
+	RequestID           string          `json:"request_id,omitempty"`
 	CandidateArtifactID string          `json:"candidate_artifact_id"`
 	TestBasisID         string          `json:"test_basis_id"`
 	SubstrateSelector   string          `json:"substrate_selector,omitempty"`
@@ -70,6 +71,12 @@ type SubmitMitigationCheckRequest struct {
 	UpstreamProse       string          `json:"prose_summary,omitempty"`
 	UpstreamResultID    string          `json:"result_id,omitempty"`
 	UpstreamTerminal    string          `json:"terminal_state,omitempty"`
+	Callback            *CallbackSpec   `json:"callback,omitempty"`
+}
+
+type CallbackSpec struct {
+	URL             string `json:"url"`
+	EventContractID string `json:"event_contract_id"`
 }
 
 // PrimaryCandidate is the upstream defense-generation candidate. artifact_content
@@ -190,6 +197,8 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/mitigation-check-runs", withCORS(handleRunsCollection))
 	mux.HandleFunc("/v1/mitigation-check-runs/", withCORS(handleRunItem))
+	mux.HandleFunc("/v1/compat/mitigation-check-runs", withCORS(handleCompatibilityRunsCollection))
+	mux.HandleFunc("/v1/compat/mitigation-check-runs/", withCORS(handleCompatibilityRunItem))
 	mux.HandleFunc("/healthz", withCORS(handleHealth))
 	mux.HandleFunc("/openapi.yaml", withCORS(handleOpenAPI))
 	mux.HandleFunc("/docs", withCORS(handleDocs))
@@ -199,6 +208,9 @@ func main() {
 		port = "8090"
 	}
 	srv := &http.Server{Addr: ":" + port, Handler: mux}
+	workerCtx, stopWorkers := context.WithCancel(context.Background())
+	worker := NewRunWorker(store, executeDurableRun, dbx)
+	go worker.Run(workerCtx)
 
 	// On SIGINT/SIGTERM (docker stop) stop accepting requests, then fall through
 	// so main can shut the embedded Postgres down cleanly before exiting.
@@ -214,6 +226,7 @@ func main() {
 
 	log.Printf("mitigation-check API listening on %s", srv.Addr)
 	err = srv.ListenAndServe()
+	stopWorkers()
 	store.Close() // synchronous: guarantees postgres stops cleanly before exit
 	dbx.Close()
 	dbxReader.Close()
@@ -231,18 +244,17 @@ func enrichEnvelope(out *RunOutcome, correlationID string) {
 	out.Capability = "mitigation-check"
 	out.ContractID = contractID
 	out.CorrelationID = correlationID
-	out.EvidenceRefs = []string{}
+	if out.EvidenceRefs == nil {
+		out.EvidenceRefs = []string{}
+	}
 	if out.TerminalState == stateMalfunction {
 		out.Status = "failed"
 	} else {
 		out.Status = "completed"
 	}
-	out.ResultRef = &ResultRef{
-		System:  "databricks",
-		Catalog: os.Getenv("DATABRICKS_CATALOG"),
-		Schema:  os.Getenv("DATABRICKS_SCHEMA"),
-		Table:   firstNonEmpty(os.Getenv("DATABRICKS_TABLE"), "mitigation_check"),
-		Key:     out.ResultID,
+	out.ResultRef = nil
+	if dbx != nil {
+		out.ResultRef = dbx.ResultRef(out.ResultID)
 	}
 }
 
@@ -308,14 +320,14 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// handleRunsCollection routes the /v1/mitigation-check-runs collection:
-// GET lists runs (LLD §9.2), POST submits a new run (LLD §9.1).
-func handleRunsCollection(w http.ResponseWriter, r *http.Request) {
+// handleCompatibilityRunsCollection retains the old synchronous API on an
+// explicit compatibility path. New orchestrators must use the durable async API.
+func handleCompatibilityRunsCollection(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		writeJSON(w, http.StatusOK, store.List())
 	case http.MethodPost:
-		handleSubmitRun(w, r)
+		handleSubmitRunSync(w, r)
 	default:
 		writeError(w, http.StatusMethodNotAllowed, APIError{
 			Category: "invalid-input", Message: "method not allowed",
@@ -323,8 +335,8 @@ func handleRunsCollection(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleRunItem returns one run's immutable request + response (LLD §9.2/§9.3).
-func handleRunItem(w http.ResponseWriter, r *http.Request) {
+// handleCompatibilityRunItem returns one legacy run's immutable request + response.
+func handleCompatibilityRunItem(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, APIError{
 			Category: "invalid-input", Message: "method not allowed",
@@ -342,8 +354,8 @@ func handleRunItem(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, rec)
 }
 
-// handleSubmitRun implements POST /v1/mitigation-check-runs (LLD §9.1).
-func handleSubmitRun(w http.ResponseWriter, r *http.Request) {
+// handleSubmitRunSync implements the explicitly separate synchronous compatibility path.
+func handleSubmitRunSync(w http.ResponseWriter, r *http.Request) {
 	req, raw, apiErr := decodeRequest(r)
 	if apiErr != nil {
 		writeError(w, http.StatusBadRequest, *apiErr)
@@ -361,20 +373,12 @@ func handleSubmitRun(w http.ResponseWriter, r *http.Request) {
 
 	// Execute the scenario synchronously: bring up the substrate container, apply
 	// the candidate WAF rule, run the supplied test, and resolve a terminal state
-	// (LLD §5, §6.4, §6.5). Bounded by a request-scoped timeout.
+	// (LLD §5, §6.4, §6.5). The request context always remains authoritative;
+	// MC_EXECUTION_TIMEOUT can optionally add an operator-configured deadline.
 	runID := "mc-run-" + newID()
 	resultID := resultIDPrefix + newID()
 
-	// GitHub runs dispatch a remote workflow (checkout + build + docker pull +
-	// run), which takes longer than a local container bring-up.
-	budget := 3 * time.Minute
-	switch req.ExecutionMode {
-	case execGitHub, execGitHubGHCR:
-		budget = 12 * time.Minute
-	case execACI, execACISP:
-		budget = 10 * time.Minute // ACI provisioning + image pull + app start
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), budget)
+	ctx, cancel := executionContext(r.Context())
 	defer cancel()
 
 	var outcome RunOutcome
@@ -384,6 +388,16 @@ func handleSubmitRun(w http.ResponseWriter, r *http.Request) {
 		outcome = executeScenario(ctx, req, runID, resultID)
 	}
 	enrichEnvelope(&outcome, req.CorrelationID)
+	outcome.CreatedAt = time.Now().UTC()
+	if err := setCanonicalIntegrity(&outcome); err != nil {
+		writeError(w, http.StatusInternalServerError, APIError{Category: "malfunction", Message: "could not encode canonical result"})
+		return
+	}
+	payload, err := canonicalResultPayload(outcome)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, APIError{Category: "malfunction", Message: "could not encode canonical result"})
+		return
+	}
 
 	// Secondary sink: write the result to the Databricks table synchronously so the
 	// envelope's status can reflect the write. terminal_state stays the test result;
@@ -391,8 +405,14 @@ func handleSubmitRun(w http.ResponseWriter, r *http.Request) {
 	// a hard failure). A malfunction is already "failed", so a write failure there
 	// doesn't change it — but the row is still written for diagnostics.
 	if dbx != nil {
-		if err := dbx.Write(ctx, outcome); err != nil && outcome.TerminalState != stateMalfunction {
-			outcome.Status = "storage-failed"
+		if publishErr := dbx.Publish(ctx, outcome, payload); publishErr != nil {
+			verifyErr := dbx.Verify(context.WithoutCancel(ctx), outcome, payload)
+			if verifyErr != nil && outcome.TerminalState != stateMalfunction {
+				outcome.Status = "storage-failed"
+				if err := setCanonicalIntegrity(&outcome); err == nil {
+					payload, _ = canonicalResultPayload(outcome)
+				}
+			}
 		}
 	}
 
@@ -456,22 +476,34 @@ func validate(req SubmitMitigationCheckRequest) []string {
 	var bad []string
 	// In upstream-input mode the rule is read from Databricks via upstream_inputs, so
 	// the legacy reference ids are not required and the upstream contract is accepted.
-	if req.ContractID != contractID && !(upstreamInputMode && req.ContractID == upstreamContractID) {
+	if req.ContractID != contractID {
 		bad = append(bad, "contract_id")
 	}
-	if upstreamInputMode {
-		if len(req.UpstreamInputs) == 0 {
+	if strings.TrimSpace(req.CandidateArtifactID) == "" {
+		bad = append(bad, "candidate_artifact_id")
+	}
+	if strings.TrimSpace(req.TestBasisID) == "" {
+		bad = append(bad, "test_basis_id")
+	}
+	if strings.TrimSpace(req.CheckProfileID) == "" {
+		bad = append(bad, "check_profile_id")
+	}
+	if len(req.UpstreamInputs) > 0 {
+		entries, err := parseUpstreamInputs(req.UpstreamInputs)
+		if err != nil {
 			bad = append(bad, "upstream_inputs")
-		}
-	} else {
-		if strings.TrimSpace(req.CandidateArtifactID) == "" {
-			bad = append(bad, "candidate_artifact_id")
-		}
-		if strings.TrimSpace(req.TestBasisID) == "" {
-			bad = append(bad, "test_basis_id")
-		}
-		if strings.TrimSpace(req.CheckProfileID) == "" {
-			bad = append(bad, "check_profile_id")
+		} else {
+			for i, entry := range entries {
+				prefix := fmt.Sprintf("upstream_inputs[%d]", i)
+				if strings.TrimSpace(entry.Capability) == "" || strings.TrimSpace(entry.ContractID) == "" {
+					bad = append(bad, prefix)
+				}
+				ref := entry.ResultRef
+				if ref.System != "databricks" || strings.TrimSpace(ref.Catalog) == "" || strings.TrimSpace(ref.Schema) == "" ||
+					strings.TrimSpace(ref.Table) == "" || strings.TrimSpace(ref.Key) == "" || ref.Key != entry.ResultID {
+					bad = append(bad, prefix+".result_ref")
+				}
+			}
 		}
 	}
 	// substrate_selector is optional (LLD §10.1) — no constraint.
@@ -532,7 +564,7 @@ func withCORS(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Idempotency-Key, X-Correlation-ID")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return

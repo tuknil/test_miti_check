@@ -5,9 +5,11 @@ info:
   description: >
     Fast block/pass proof capability for one candidate mitigation against one
     test basis in one bounded validation substrate (contract `mitigation-check@1.0`).
-    On submit the API brings up the substrate container, applies the candidate
-    WAF rule, runs the supplied test, resolves a terminal state, and records the
-    run (immutable request + response) in a durable ledger.
+    Canonical submission is asynchronous and creates a durable PostgreSQL run
+    before a leased worker executes the existing mitigation-check executor.
+    Valid transitions are queued to running to a terminal state, queued to
+    canceled, running to queued for publication retry, and expired running to
+    failed or canceled during recovery. Terminal runs are immutable.
 servers:
   - url: http://localhost:8137
     description: Local / Docker Compose
@@ -15,12 +17,16 @@ servers:
 paths:
   /v1/mitigation-check-runs:
     post:
-      summary: Submit and execute a mitigation-check run
+      summary: Submit a durable asynchronous mitigation-check run
       operationId: submitRun
       description: >
-        Validates the request against `SubmitMitigationCheckRequest@1`, then
-        executes it: start the substrate container, apply the candidate rule,
-        run the test, and resolve a terminal state.
+        Validates and durably queues work, then immediately returns. Identical
+        retries reuse the run; reuse with a different normalized digest is 409.
+        Only the application/json media type is accepted. Callbacks are deferred;
+        clients must poll the status and result endpoints.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/CorrelationID"
       requestBody:
         required: true
         content:
@@ -61,14 +67,32 @@ paths:
                       blocked: true
                       status_code: 403
       responses:
-        "200":
-          description: Run executed; terminal state resolved.
+        "202":
+          description: Run durably queued or running.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RunOutcome"
+                $ref: "#/components/schemas/SubmissionResponse"
+        "200":
+          description: Idempotent replay of an already-terminal run.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmissionResponse"
         "400":
           description: Request does not satisfy the contract.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "415":
+          description: Content-Type is not application/json.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: The idempotency key is bound to another request digest.
           content:
             application/json:
               schema:
@@ -88,7 +112,7 @@ paths:
 
   /v1/mitigation-check-runs/{run_id}:
     get:
-      summary: Get one run (immutable request + response)
+      summary: Get cheap compact run status
       operationId: getRun
       parameters:
         - name: run_id
@@ -99,17 +123,80 @@ paths:
           example: mc-run-a2366a64394de5472eb39642
       responses:
         "200":
-          description: The run record.
+          description: Side-effect-free status envelope.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RunRecord"
+                $ref: "#/components/schemas/RunStatus"
         "404":
           description: Run not found.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+
+  /v1/mitigation-check-runs/{run_id}/result:
+    get:
+      summary: Get the immutable terminal result
+      operationId: getRunResult
+      parameters:
+        - $ref: "#/components/parameters/RunID"
+      responses:
+        "200":
+          description: Full immutable result, or terminal failed/canceled status.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/RunOutcome"
+                  - $ref: "#/components/schemas/RunStatus"
+        "409":
+          description: Run is queued or running.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: Run not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /v1/mitigation-check-runs/{run_id}/cancel:
+    post:
+      summary: Idempotently request cancellation
+      operationId: cancelRun
+      parameters:
+        - $ref: "#/components/parameters/RunID"
+      responses:
+        "200":
+          description: >
+            Current status. Running work remains running while cooperative
+            cancellation is in progress. Terminal runs are never changed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunStatus"
+
+  /v1/compat/mitigation-check-runs:
+    post:
+      summary: Execute synchronously for legacy UI compatibility
+      deprecated: true
+      operationId: submitRunSynchronously
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitMitigationCheckRequest"
+      responses:
+        "200":
+          description: Full terminal result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunOutcome"
 
   /healthz:
     get:
@@ -128,6 +215,22 @@ paths:
                     example: ok
 
 components:
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 1 }
+    CorrelationID:
+      name: X-Correlation-ID
+      in: header
+      required: true
+      schema: { type: string, minLength: 1 }
+    RunID:
+      name: run_id
+      in: path
+      required: true
+      schema: { type: string }
   schemas:
     SubmitMitigationCheckRequest:
       type: object
@@ -137,6 +240,10 @@ components:
         contract_id:
           type: string
           enum: ["mitigation-check@1.0"]
+        request_id:
+          type: string
+          minLength: 1
+          description: Must equal Idempotency-Key. May be omitted during migration and is then populated from that header.
         candidate_artifact_id:
           type: string
           minLength: 1
@@ -171,8 +278,8 @@ components:
         correlation_id:
           type: string
           description: >
-            Optional caller correlation id, echoed into the result envelope's
-            correlation_id (omitted from the response when not supplied).
+            Must equal X-Correlation-ID. May be omitted during migration and is
+            then populated from that required header.
           example: "mc-request:CVE-2021-44228:waf:1"
         substrate:
           $ref: "#/components/schemas/SubstrateSpec"
@@ -186,8 +293,8 @@ components:
             Upstream-mode input (env MC_INPUT_UPSTREAM). Each entry's result_ref
             points at a Databricks row; the mitigation rule is read from the rule
             entry's result_json.primary_candidate.artifact_content. The test still
-            comes from test_basis. In upstream mode contract_id may also be
-            "defense-generation@1.0" and the legacy reference ids are not required.
+            comes from test_basis. The top-level contract remains
+            "mitigation-check@1.0" and canonical identity fields remain required.
           items:
             $ref: "#/components/schemas/UpstreamInput"
         primary_candidate:
@@ -196,6 +303,90 @@ components:
             Upstream defense-generation candidate; artifact_content carries the
             ModSecurity rule. Accepted so a full defense-generation payload
             validates. In upstream mode the rule is read from Databricks, not here.
+        callback:
+          type: object
+          deprecated: true
+          description: >
+            Reserved for a later callback rollout. Any submission containing
+            this field is currently rejected with code callbacks_disabled;
+            poll the status and result endpoints.
+          additionalProperties: false
+          required: [url]
+          properties:
+            url: { type: string, format: uri, pattern: "^https://" }
+            event_contract_id: { type: string, enum: ["capability-run-event@1.0"] }
+
+    SubmissionResponse:
+      type: object
+      required: [capability, contract_id, request_id, correlation_id, run_id, status, status_url, result_url, accepted_at]
+      properties:
+        capability: { type: string, enum: [mitigation-check] }
+        contract_id: { type: string, enum: ["mitigation-check-run-submission@1.0"] }
+        request_id: { type: string }
+        correlation_id: { type: string }
+        run_id: { type: string }
+        status: { type: string, enum: [queued, running, completed, failed, canceled] }
+        status_url: { type: string }
+        result_url: { type: string }
+        accepted_at: { type: string, format: date-time }
+
+    RunStatus:
+      type: object
+      required: [capability, contract_id, request_id, correlation_id, run_id, status, created_at, updated_at, progress]
+      properties:
+        capability: { type: string, enum: [mitigation-check] }
+        contract_id: { type: string, enum: ["capability-run-status@1.0"] }
+        request_id: { type: string }
+        correlation_id: { type: string }
+        run_id: { type: string }
+        status: { type: string, enum: [queued, running, completed, failed, canceled] }
+        terminal_state: { type: string, nullable: true }
+        result_id: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        started_at: { type: string, format: date-time, nullable: true }
+        updated_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time, nullable: true }
+        progress: { $ref: "#/components/schemas/Progress" }
+        failure: { $ref: "#/components/schemas/Failure", nullable: true }
+        completion:
+          allOf:
+            - $ref: "#/components/schemas/Completion"
+          nullable: true
+
+    Completion:
+      type: object
+      required: [capability, contract_id, request_id, correlation_id, run_id, result_id, status, terminal_state, result_ref, evidence_refs, content_sha256, size_bytes, created_at]
+      properties:
+        capability: { type: string, enum: [mitigation-check] }
+        contract_id: { type: string, enum: ["capability-completion@1.0"] }
+        request_id: { type: string }
+        correlation_id: { type: string }
+        run_id: { type: string }
+        result_id: { type: string }
+        status: { type: string, enum: [completed] }
+        terminal_state: { type: string, enum: [blocked, not-blocked, could-not-test] }
+        result_ref: { $ref: "#/components/schemas/ResultRef" }
+        evidence_refs:
+          type: array
+          items: { type: string }
+        content_sha256: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
+        size_bytes: { type: integer, minimum: 1 }
+        created_at: { type: string, format: date-time }
+
+    Progress:
+      type: object
+      properties:
+        phase: { type: string }
+        percent: { type: integer, nullable: true }
+        message: { type: string }
+
+    Failure:
+      type: object
+      required: [code, detail, retryable]
+      properties:
+        code: { type: string }
+        detail: { type: string }
+        retryable: { type: boolean }
 
     UpstreamInput:
       type: object
@@ -312,6 +503,7 @@ components:
       description: >
         Result envelope (capability .. evidence_refs) with the full verdict detail
         appended (match .. limitations).
+      required: [capability, contract_id, request_id, correlation_id, run_id, result_id, terminal_state, status, result_ref, evidence_refs, request_sha256, match, expected, actual, prose_summary, content_sha256, size_bytes, created_at]
       properties:
         capability:
           type: string
@@ -319,6 +511,8 @@ components:
         contract_id:
           type: string
           enum: ["mitigation-check@1.0"]
+        request_id:
+          type: string
         run_id:
           type: string
         result_id:
@@ -329,11 +523,10 @@ components:
           description: The test result.
         status:
           type: string
-          enum: [completed, storage-failed, failed]
+          enum: [completed, failed]
           description: >
-            Workflow status. "completed" on success; "storage-failed" when the
-            Databricks write failed (terminal_state is still the test result);
-            "failed" when the run malfunctioned.
+            Lifecycle status. Canonical asynchronous completion is reported only
+            after immutable Databricks publication succeeds.
         correlation_id:
           type: string
           description: Echoed from the request; omitted when not supplied.
@@ -343,6 +536,15 @@ components:
           type: array
           items:
             type: string
+        request_sha256:
+          type: string
+          pattern: "^sha256:[0-9a-f]{64}$"
+          description: SHA-256 of the normalized request bound to the idempotency key.
+        upstream_inputs:
+          type: array
+          description: Exact authoritative upstream result identities used for this check.
+          items:
+            $ref: "#/components/schemas/UpstreamInput"
         match:
           type: boolean
           description: Whether actual.blocked equals expected.blocked.
@@ -372,12 +574,22 @@ components:
           type: array
           items:
             type: string
+        content_sha256:
+          type: string
+          pattern: "^sha256:[0-9a-f]{64}$"
+        size_bytes:
+          type: integer
+          minimum: 1
+        created_at:
+          type: string
+          format: date-time
 
     ResultRef:
       type: object
       description: >
         Pointer to where the full result row is stored so another service can
         query it.
+      required: [system, catalog, schema, table, key]
       properties:
         system:
           type: string
@@ -476,16 +688,12 @@ components:
 
     ErrorEnvelope:
       type: object
+      required: [code, detail, retryable]
       properties:
-        error:
-          type: object
-          properties:
-            category:
-              type: string
-              example: invalid-input
-            message:
-              type: string
-            fields:
-              type: array
-              items:
-                type: string
+        code:
+          type: string
+          example: invalid_request
+        detail:
+          type: string
+        retryable:
+          type: boolean
