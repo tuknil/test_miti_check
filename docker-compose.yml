@@ -33,6 +33,9 @@ services:
       PORT: "8137"
       GODEBUG: x509negativeserial=1
       DATABASE_URL: postgres://mc:mc@db:5432/mitigation?sslmode=disable
+      # Async execution for in-memory scenarios (POST returns queued; poll the
+      # status endpoint). Unset = synchronous.
+      MC_ASYNC: ${MC_ASYNC:-}
       # Azure ACI execution mode (optional).
       AZURE_SUBSCRIPTION_ID: ${AZURE_SUBSCRIPTION_ID:-}
       MC_ACI_RESOURCE_GROUP: ${MC_ACI_RESOURCE_GROUP:-}

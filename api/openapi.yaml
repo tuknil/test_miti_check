@@ -62,11 +62,19 @@ paths:
                       status_code: 403
       responses:
         "200":
-          description: Run executed; terminal state resolved.
+          description: Run executed synchronously; terminal state resolved.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/RunOutcome"
+        "202":
+          description: >
+            Async mode (env MC_ASYNC) for an in-memory run: accepted and queued.
+            Poll /v1/mitigation-check-run-status with the returned run_id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueuedRunResponse"
         "400":
           description: Request does not satisfy the contract.
           content:
@@ -110,6 +118,31 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+
+  /v1/mitigation-check-run-status:
+    post:
+      summary: Check the status of a run (for async execution)
+      description: >
+        In async mode (env MC_ASYNC) an in-memory POST returns status "queued" and
+        runs in the background. This endpoint looks the run up by run_id in Postgres
+        then Databricks: if the result is stored the run has completed and the full
+        response is returned with status "completed"; otherwise status is "running".
+      operationId: checkRunStatus
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StatusCheckRequest"
+      responses:
+        "200":
+          description: Completed (RunOutcome with status "completed") or still running.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/RunOutcome"
+                  - $ref: "#/components/schemas/QueuedRunResponse"
 
   /healthz:
     get:
@@ -418,6 +451,37 @@ components:
           description: ACI public FQDN (aci runner only).
         ready:
           type: boolean
+
+    QueuedRunResponse:
+      type: object
+      description: Async POST acknowledgement / status-check "running" response.
+      properties:
+        capability:
+          type: string
+          enum: ["mitigation-check"]
+        contract_id:
+          type: string
+          enum: ["mitigation-check@1.0"]
+        run_id:
+          type: string
+        correlation_id:
+          type: string
+        status:
+          type: string
+          enum: [queued, running]
+
+    StatusCheckRequest:
+      type: object
+      required: [run_id]
+      properties:
+        capability:
+          type: string
+        contract_id:
+          type: string
+        run_id:
+          type: string
+        correlation_id:
+          type: string
 
     RunSummary:
       type: object

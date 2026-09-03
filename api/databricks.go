@@ -90,6 +90,26 @@ func (s *DatabricksSink) Write(ctx context.Context, outcome RunOutcome) error {
 	return nil
 }
 
+// GetByRunID returns the stored result_json for a run_id (used by the status
+// endpoint). ok is false when no row exists yet.
+func (s *DatabricksSink) GetByRunID(ctx context.Context, runID string) ([]byte, bool, error) {
+	if s == nil || s.db == nil {
+		return nil, false, nil
+	}
+	c, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	var js string
+	err := s.db.QueryRowContext(c,
+		"SELECT result_json FROM "+s.table+" WHERE run_id = ? LIMIT 1", runID).Scan(&js)
+	if err == sql.ErrNoRows {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return []byte(js), true, nil
+}
+
 func (s *DatabricksSink) Close() {
 	if s != nil && s.db != nil {
 		_ = s.db.Close()

@@ -151,6 +151,19 @@ var upstreamInputMode bool
 // dbxReader reads upstream result_json rows from Databricks (upstream mode only).
 var dbxReader *DatabricksReader
 
+// asyncMode runs in-memory scenarios in the background: the POST returns a
+// "queued" reference and the result is retrieved via the status-check endpoint.
+// Toggled by env MC_ASYNC (truthy). The sync path is unchanged when unset.
+var asyncMode bool
+
+func envTruthy(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "1", "true", "yes":
+		return true
+	}
+	return false
+}
+
 func main() {
 	// CLI mode used by the GitHub Actions workflow: run one scenario locally
 	// (docker on the runner) and print the RunOutcome JSON to stdout. No DB.
@@ -189,8 +202,13 @@ func main() {
 		log.Printf("input contract: UPSTREAM mode (rule read from Databricks via upstream_inputs)")
 	}
 
+	if asyncMode = envTruthy("MC_ASYNC"); asyncMode {
+		log.Printf("execution: ASYNC mode for in-memory scenarios (POST returns queued; poll the status endpoint)")
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/mitigation-check-runs", withCORS(handleRunsCollection))
+	mux.HandleFunc("/v1/mitigation-check-run-status", withCORS(handleStatusCheck))
 	mux.HandleFunc("/v1/mitigation-check-runs/", withCORS(handleRunItem))
 	mux.HandleFunc("/healthz", withCORS(handleHealth))
 	mux.HandleFunc("/openapi.yaml", withCORS(handleOpenAPI))
@@ -376,9 +394,47 @@ func handleSubmitRun(w http.ResponseWriter, r *http.Request) {
 	case execACI, execACISP:
 		budget = 10 * time.Minute // ACI provisioning + image pull + app start
 	}
+
+	// Async: in-memory scenarios may run in the background when MC_ASYNC is set.
+	// The POST returns immediately with status "queued"; the result lands in the
+	// databases and is retrieved via /v1/mitigation-check-run-status.
+	if asyncMode && isInMemoryMode(req.ExecutionMode) {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), budget)
+			defer cancel()
+			defer func() {
+				if p := recover(); p != nil {
+					log.Printf("async run %s panicked: %v", runID, p)
+				}
+			}()
+			runAndPersist(ctx, req, raw, runID, resultID)
+		}()
+		writeJSON(w, http.StatusAccepted, QueuedRunResponse{
+			Capability:    "mitigation-check",
+			ContractID:    contractID,
+			RunID:         runID,
+			CorrelationID: req.CorrelationID,
+			Status:        "queued",
+		})
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), budget)
 	defer cancel()
+	outcome := runAndPersist(ctx, req, raw, runID, resultID)
+	writeJSON(w, http.StatusOK, outcome)
+}
 
+// isInMemoryMode reports whether the execution mode runs in-process (so it is
+// eligible for background execution in async mode). Empty defaults to inmemory.
+func isInMemoryMode(m string) bool {
+	return m == "" || m == execInMemory || m == execFirewall
+}
+
+// runAndPersist executes the scenario, enriches the envelope, writes the result to
+// Databricks (status reflects the write), and records it in the Postgres ledger.
+// Used by both the sync response path and the async background goroutine.
+func runAndPersist(ctx context.Context, req SubmitMitigationCheckRequest, raw json.RawMessage, runID, resultID string) RunOutcome {
 	var outcome RunOutcome
 	if upstreamInputMode {
 		outcome = executeScenarioUpstream(ctx, req, runID, resultID)
@@ -387,19 +443,16 @@ func handleSubmitRun(w http.ResponseWriter, r *http.Request) {
 	}
 	enrichEnvelope(&outcome, req.CorrelationID)
 
-	// Secondary sink: write the result to the Databricks table synchronously so the
-	// envelope's status can reflect the write. terminal_state stays the test result;
-	// only status degrades to "storage-failed" when the write fails (the run is not
-	// a hard failure). A malfunction is already "failed", so a write failure there
-	// doesn't change it — but the row is still written for diagnostics.
+	// Secondary sink: write the result to Databricks so the envelope's status can
+	// reflect the write. terminal_state stays the test result; only status degrades
+	// to "storage-failed" when the write fails. A malfunction is already "failed".
 	if dbx != nil {
 		if err := dbx.Write(ctx, outcome); err != nil && outcome.TerminalState != stateMalfunction {
 			outcome.Status = "storage-failed"
 		}
 	}
 
-	// Record the run in the ledger (source of truth) with the exact immutable
-	// request bytes and the final envelope (including the resolved status).
+	// Record the run in the ledger (source of truth) with the immutable request.
 	if err := store.Add(&RunRecord{
 		RunID:         runID,
 		ResultID:      resultID,
@@ -411,8 +464,71 @@ func handleSubmitRun(w http.ResponseWriter, r *http.Request) {
 	}); err != nil {
 		log.Printf("ledger: failed to persist run %s: %v", runID, err)
 	}
+	return outcome
+}
 
-	writeJSON(w, http.StatusOK, outcome)
+// QueuedRunResponse is returned by an async POST and by the status endpoint while
+// a run is still in progress.
+type QueuedRunResponse struct {
+	Capability    string `json:"capability"`
+	ContractID    string `json:"contract_id"`
+	RunID         string `json:"run_id"`
+	CorrelationID string `json:"correlation_id,omitempty"`
+	Status        string `json:"status"` // "queued" | "running"
+}
+
+// StatusCheckRequest is the body of the status-check endpoint.
+type StatusCheckRequest struct {
+	Capability    string `json:"capability"`
+	ContractID    string `json:"contract_id"`
+	RunID         string `json:"run_id"`
+	CorrelationID string `json:"correlation_id,omitempty"`
+}
+
+// handleStatusCheck looks a run up by run_id in Postgres, then Databricks. If the
+// result is stored the run has completed and the full response is returned with
+// status "completed"; otherwise the run is still "running".
+func handleStatusCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, APIError{Category: "invalid-input", Message: "use POST"})
+		return
+	}
+	var sr StatusCheckRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, maxBodyBytes)).Decode(&sr); err != nil {
+		writeError(w, http.StatusBadRequest, APIError{Category: "invalid-input", Message: "request body is not valid JSON"})
+		return
+	}
+	if strings.TrimSpace(sr.RunID) == "" {
+		writeError(w, http.StatusBadRequest, APIError{Category: "invalid-input", Message: "run_id is required", Fields: []string{"run_id"}})
+		return
+	}
+
+	// Postgres is the source of truth (the async run writes it synchronously).
+	if rec, ok := store.Get(sr.RunID); ok {
+		out := rec.Response
+		out.Status = "completed"
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+	// Databricks fallback, by run_id.
+	if dbx != nil {
+		if js, ok, err := dbx.GetByRunID(r.Context(), sr.RunID); err == nil && ok {
+			var out RunOutcome
+			if json.Unmarshal(js, &out) == nil {
+				out.Status = "completed"
+				writeJSON(w, http.StatusOK, out)
+				return
+			}
+		}
+	}
+	// Not stored yet — still running.
+	writeJSON(w, http.StatusOK, QueuedRunResponse{
+		Capability:    firstNonEmpty(sr.Capability, "mitigation-check"),
+		ContractID:    firstNonEmpty(sr.ContractID, contractID),
+		RunID:         sr.RunID,
+		CorrelationID: sr.CorrelationID,
+		Status:        "running",
+	})
 }
 
 // decodeRequest reads and strictly decodes the body, rejecting unknown fields to

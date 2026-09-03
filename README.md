@@ -248,6 +248,31 @@ need not query the upstream table the rule was sourced from:
 
 For a local (non-Docker) API run, point `DATABASE_URL` at any reachable Postgres.
 
+### Async execution (env `MC_ASYNC`)
+
+When **`MC_ASYNC`** is truthy, in-memory scenarios (`inmemory`, `firewall`) run in
+the **background**. The `POST /v1/mitigation-check-runs` returns immediately with
+
+```json
+{ "capability": "mitigation-check", "contract_id": "mitigation-check@1.0",
+  "run_id": "mc-run-…", "correlation_id": "…", "status": "queued" }
+```
+
+and the result lands in the databases when the run finishes. The synchronous
+executors are unchanged and still used when `MC_ASYNC` is unset (and always for
+the non-in-memory modes).
+
+Poll for the result with **`POST /v1/mitigation-check-run-status`**:
+
+```json
+{ "capability": "mitigation-check", "contract_id": "mitigation-check@1.0",
+  "run_id": "mc-run-…", "correlation_id": "…" }
+```
+
+It looks the run up by `run_id` in Postgres, then Databricks. If the result is
+stored the run has completed and the **full response** is returned with
+`status: "completed"`; otherwise it returns `status: "running"`.
+
 ### Input contract: rule read from Databricks (upstream mode)
 
 A **separate executor**, **on by default** (set env **`MC_INPUT_UPSTREAM`** to
