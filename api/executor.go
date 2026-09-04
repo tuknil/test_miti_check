@@ -47,6 +47,7 @@ type RunOutcome struct {
 	EvidenceRefs   []string        `json:"evidence_refs"`
 	RequestSHA256  string          `json:"request_sha256"`
 	UpstreamInputs json.RawMessage `json:"upstream_inputs,omitempty"`
+	InputProvenance *LocatorProvenance `json:"input_provenance,omitempty"`
 
 	Match     bool     `json:"match"`
 	Expected  Expected `json:"expected"`
