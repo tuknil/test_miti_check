@@ -210,7 +210,9 @@ func main() {
 	srv := &http.Server{Addr: ":" + port, Handler: mux}
 	workerCtx, stopWorkers := context.WithCancel(context.Background())
 	worker := NewRunWorker(store, executeDurableRun, dbx)
+	callbackDispatcher := NewCallbackDispatcher(store, os.Getenv("CAPABILITY_CALLBACK_TOKEN"))
 	go worker.Run(workerCtx)
+	go callbackDispatcher.Run(workerCtx)
 
 	// On SIGINT/SIGTERM (docker stop) stop accepting requests, then fall through
 	// so main can shut the embedded Postgres down cleanly before exiting.

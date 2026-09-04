@@ -45,8 +45,20 @@ The immutable result includes the normalized request digest, exact upstream
 result identities, and deduplicated upstream evidence references used by the
 check.
 
-Callbacks are deferred and disabled. A request containing `callback` returns
-`400 callbacks_disabled`; orchestration must poll status and result endpoints.
+Optional callback delivery is enabled by supplying `X-Janus-Callback-URL`,
+`X-Janus-Callback-Workflow-ID`, and `X-Janus-Callback-Signal` together. The URL
+must use HTTPS, the signal must equal `janus.capability-completion.v1`, and an
+optional `CAPABILITY_CALLBACK_ALLOWED_HOSTS` comma-separated allowlist restricts
+the destination hostname. Body-level `callback` metadata is rejected.
+
+After a terminal status and corresponding result response are committed, the
+same PostgreSQL transaction makes one stable outbox event eligible for delivery:
+`mitigation-check:<run_id>:terminal:v1`. A separate leased dispatcher posts only
+the workflow ID and wakeup identifiers using `CAPABILITY_CALLBACK_TOKEN`; the
+canonical result body is never included. Delivery is at least once with jittered
+backoff, `Retry-After` support, and indefinite 15-minute retries after the
+initial schedule. Polling remains available when delivery fails or callbacks are
+not configured. The callback token is never returned or logged.
 Errors from the canonical lifecycle endpoints are root objects containing
 `code`, `detail`, and `retryable`. Submission accepts only the
 `application/json` media type (parameters such as `charset` are allowed).

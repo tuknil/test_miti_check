@@ -97,7 +97,7 @@ func TestAsyncSubmitRequiresExactJSONMediaTypeAndRootErrors(t *testing.T) {
 	}
 }
 
-func TestAsyncSubmitRejectsDisabledCallbackBeforePersistence(t *testing.T) {
+func TestAsyncSubmitRejectsBodyCallbackBeforePersistence(t *testing.T) {
 	request := validLifecycleRequest("request-callback")
 	request.Callback = &CallbackSpec{URL: "https://callback.invalid/events", EventContractID: "capability-run-event@1.0"}
 	body, _ := json.Marshal(request)
@@ -107,7 +107,7 @@ func TestAsyncSubmitRejectsDisabledCallbackBeforePersistence(t *testing.T) {
 	req.Header.Set("X-Correlation-ID", request.CorrelationID)
 	response := httptest.NewRecorder()
 	handleAsyncSubmit(response, req)
-	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "callbacks_disabled") {
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "invalid_callback_location") {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }

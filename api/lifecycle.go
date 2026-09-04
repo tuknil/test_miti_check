@@ -86,6 +86,11 @@ func handleAsyncSubmit(w http.ResponseWriter, r *http.Request) {
 		writeLifecycleError(w, http.StatusBadRequest, "missing_required_header", "Idempotency-Key and X-Correlation-ID are required", false)
 		return
 	}
+	callback, callbackErr := callbackMetadataFromHeaders(r.Header, callbackAllowedHosts())
+	if callbackErr != nil {
+		writeLifecycleError(w, http.StatusBadRequest, callbackErr.Code, callbackErr.Detail, callbackErr.Retryable)
+		return
+	}
 	req, _, apiErr := decodeRequest(r)
 	if apiErr != nil {
 		writeLifecycleError(w, http.StatusBadRequest, "invalid_request", apiErr.Message, false)
@@ -109,7 +114,7 @@ func handleAsyncSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Callback != nil {
-		writeLifecycleError(w, http.StatusBadRequest, "callbacks_disabled", "Completion callbacks are deferred; poll the status and result endpoints", false)
+		writeLifecycleError(w, http.StatusBadRequest, "invalid_callback_location", "Completion callbacks must be supplied with the X-Janus-Callback-* headers", false)
 		return
 	}
 	normalized, digest, err := normalizedRequest(req)
@@ -123,6 +128,15 @@ func handleAsyncSubmit(w http.ResponseWriter, r *http.Request) {
 		RequestID: req.RequestID, CorrelationID: req.CorrelationID, RunID: "mc-run-" + newID(), Status: statusQueued,
 		ResultID: &resultID, CreatedAt: now, UpdatedAt: now, Progress: Progress{Phase: "queued", Message: "Awaiting worker"}},
 		Request: normalized, RequestDigest: digest}
+	if callback.URL != "" {
+		run.CallbackURL = callback.URL
+		run.CallbackWorkflowID = callback.WorkflowID
+		run.CallbackSignal = callback.Signal
+		run.CallbackEventID = "mitigation-check:" + run.RunID + ":terminal:v1"
+		if strings.TrimSpace(os.Getenv("CAPABILITY_CALLBACK_TOKEN")) == "" {
+			log.Printf("callback_configuration_error request_id=%q reason=%q", req.RequestID, "CAPABILITY_CALLBACK_TOKEN is not configured")
+		}
+	}
 	stored, created, err := store.CreateOrGet(r.Context(), run)
 	if err != nil {
 		logLifecycle("run_submission_failed", run, map[string]any{"error": err.Error()})
@@ -132,6 +146,17 @@ func handleAsyncSubmit(w http.ResponseWriter, r *http.Request) {
 	if stored.RequestDigest != digest {
 		writeLifecycleError(w, http.StatusConflict, "idempotency_conflict", "Idempotency-Key was already used with a different normalized request", false)
 		return
+	}
+	if stored.CallbackURL != run.CallbackURL || stored.CallbackWorkflowID != run.CallbackWorkflowID || stored.CallbackSignal != run.CallbackSignal {
+		writeLifecycleError(w, http.StatusConflict, "idempotency_callback_conflict", "Idempotency-Key was already used with different callback metadata", false)
+		return
+	}
+	if callback.URL != "" {
+		logLifecycle("callback_metadata_accepted", stored, map[string]any{
+			"callback_workflow_id": stored.CallbackWorkflowID,
+			"callback_signal":      stored.CallbackSignal,
+			"callback_token":       "[REDACTED]",
+		})
 	}
 	code := http.StatusAccepted
 	if !created && terminalStatus(stored.Status) {

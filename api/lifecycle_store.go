@@ -80,7 +80,8 @@ type DurableRun struct {
 	Attempt             int
 	CancelRequested     bool
 	CallbackURL         string
-	CallbackContract    string
+	CallbackWorkflowID  string
+	CallbackSignal      string
 	CallbackEventID     string
 }
 
@@ -108,16 +109,30 @@ func migrateLifecycle(db *sql.DB) error {
 		`ALTER TABLE mitigation_check_run ADD COLUMN IF NOT EXISTS verification_attempt INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE mitigation_check_run ADD COLUMN IF NOT EXISTS publication_retry_at TIMESTAMPTZ`,
 		`ALTER TABLE mitigation_check_run ADD COLUMN IF NOT EXISTS callback_url TEXT`,
-		`ALTER TABLE mitigation_check_run ADD COLUMN IF NOT EXISTS callback_contract TEXT`,
+		`ALTER TABLE mitigation_check_run ADD COLUMN IF NOT EXISTS callback_workflow_id TEXT`,
+		`ALTER TABLE mitigation_check_run ADD COLUMN IF NOT EXISTS callback_signal TEXT`,
 		`ALTER TABLE mitigation_check_run ADD COLUMN IF NOT EXISTS callback_event_id TEXT`,
+		`ALTER TABLE mitigation_check_run ADD COLUMN IF NOT EXISTS callback_state TEXT`,
 		`ALTER TABLE mitigation_check_run ADD COLUMN IF NOT EXISTS callback_attempt INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE mitigation_check_run ADD COLUMN IF NOT EXISTS callback_next_at TIMESTAMPTZ`,
 		`ALTER TABLE mitigation_check_run ADD COLUMN IF NOT EXISTS callback_delivered_at TIMESTAMPTZ`,
+		`ALTER TABLE mitigation_check_run ADD COLUMN IF NOT EXISTS callback_configuration_failed_at TIMESTAMPTZ`,
+		`ALTER TABLE mitigation_check_run ADD COLUMN IF NOT EXISTS callback_last_error TEXT`,
+		`ALTER TABLE mitigation_check_run ADD COLUMN IF NOT EXISTS callback_lease_token TEXT`,
+		`ALTER TABLE mitigation_check_run ADD COLUMN IF NOT EXISTS callback_lease_expires_at TIMESTAMPTZ`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS mitigation_check_run_request_id_uq ON mitigation_check_run(request_id) WHERE request_id IS NOT NULL`,
 		`CREATE INDEX IF NOT EXISTS mitigation_check_run_worker_idx ON mitigation_check_run(status, lease_expires_at, created_at)`,
+		`CREATE INDEX IF NOT EXISTS mitigation_check_run_callback_idx ON mitigation_check_run(callback_state, callback_next_at) WHERE callback_url IS NOT NULL`,
 		`UPDATE mitigation_check_run SET status=CASE WHEN terminal_state='malfunction' THEN 'failed' ELSE 'completed' END,
 		 updated_at=COALESCE(updated_at,created_at), completed_at=COALESCE(completed_at,created_at),
 		 progress_phase=COALESCE(progress_phase,'finished'), progress_message=COALESCE(progress_message,'Legacy run completed') WHERE status IS NULL`,
+		`UPDATE mitigation_check_run SET callback_state=CASE
+		 WHEN callback_delivered_at IS NOT NULL THEN 'delivered'
+		 WHEN callback_configuration_failed_at IS NOT NULL THEN 'configuration_failed'
+		 WHEN status IN ('completed','failed','canceled') THEN 'pending'
+		 ELSE 'waiting' END,
+		 callback_next_at=COALESCE(callback_next_at,updated_at,created_at)
+		 WHERE callback_url IS NOT NULL AND callback_state IS NULL`,
 	}
 	for _, statement := range statements {
 		if _, err := db.Exec(statement); err != nil {
@@ -198,11 +213,12 @@ func (s *RunStore) CreateOrGet(ctx context.Context, run DurableRun) (DurableRun,
 	res, err := tx.ExecContext(ctx, `INSERT INTO mitigation_check_run
 		(run_id,result_id,terminal_state,match,created_at,request,response,request_id,
 		 correlation_id,request_digest,status,updated_at,progress_phase,progress_message,
-		 callback_url,callback_contract,callback_event_id,callback_next_at)
-		VALUES($1,$2,'',FALSE,$3,$4,'{}',$5,$6,$7,'queued',$3,'queued','Awaiting worker',$8,$9,$10,$3)
+			 callback_url,callback_workflow_id,callback_signal,callback_event_id,callback_state,callback_next_at)
+		VALUES($1,$2,'',FALSE,$3,$4,'{}',$5,$6,$7,'queued',$3,'queued','Awaiting worker',$8,$9,$10,$11,
+		       CASE WHEN $8 IS NULL THEN NULL ELSE 'waiting' END,$3)
 		ON CONFLICT (request_id) WHERE request_id IS NOT NULL DO NOTHING`, run.RunID,
 		*run.ResultID, run.CreatedAt, []byte(run.Request), run.RequestID, run.CorrelationID,
-		run.RequestDigest, nullable(run.CallbackURL), nullable(run.CallbackContract), nullable(run.CallbackEventID))
+		run.RequestDigest, nullable(run.CallbackURL), nullable(run.CallbackWorkflowID), nullable(run.CallbackSignal), nullable(run.CallbackEventID))
 	if err != nil {
 		return DurableRun{}, false, err
 	}
@@ -226,7 +242,7 @@ func getDurable(ctx context.Context, q rowQuerier, column, value string) (Durabl
 		NULLIF(result_id,''),created_at,started_at,COALESCE(updated_at,created_at),completed_at,
 		COALESCE(progress_phase,''),COALESCE(progress_message,''),failure,request,response,result_payload,
 		publication_pending,verification_attempt,publication_retry_at,COALESCE(worker_id,''),COALESCE(lease_token,''),attempt,cancel_requested,COALESCE(callback_url,''),
-		COALESCE(callback_contract,''),COALESCE(callback_event_id,'') FROM mitigation_check_run WHERE ` + column + `=$1`
+		COALESCE(callback_workflow_id,''),COALESCE(callback_signal,''),COALESCE(callback_event_id,'') FROM mitigation_check_run WHERE ` + column + `=$1`
 	var run DurableRun
 	var terminal, resultID sql.NullString
 	var failure, request, response, resultPayload []byte
@@ -235,7 +251,7 @@ func getDurable(ctx context.Context, q rowQuerier, column, value string) (Durabl
 		&run.UpdatedAt, &run.CompletedAt, &run.Progress.Phase, &run.Progress.Message, &failure,
 		&request, &response, &resultPayload, &run.PublicationPending, &run.VerificationAttempt, &run.PublicationRetryAt, &run.WorkerID, &run.LeaseToken,
 		&run.Attempt, &run.CancelRequested, &run.CallbackURL,
-		&run.CallbackContract, &run.CallbackEventID)
+		&run.CallbackWorkflowID, &run.CallbackSignal, &run.CallbackEventID)
 	if err != nil {
 		return run, err
 	}
@@ -408,7 +424,8 @@ func (s *RunStore) CompletePublished(ctx context.Context, id, workerID, leaseTok
 	res, err := s.db.ExecContext(ctx, `UPDATE mitigation_check_run SET
 		status='completed',terminal_state=$4,match=$5,response=$6::jsonb,result_payload=$8,completion=$7,completed_at=now(),updated_at=now(),
 		progress_phase='finished',progress_message='Mitigation check completed',publication_pending=FALSE,
-		publication_retry_at=NULL,
+		publication_retry_at=NULL,callback_state=CASE WHEN callback_url IS NULL THEN callback_state ELSE 'pending' END,
+		callback_next_at=CASE WHEN callback_url IS NULL THEN callback_next_at ELSE now() END,
 		worker_id=NULL,lease_token=NULL,lease_expires_at=NULL
 		WHERE run_id=$1 AND worker_id=$2 AND lease_token=$3 AND status='running'
 		AND lease_expires_at>now()`, id, workerID, leaseToken, out.TerminalState, out.Match, string(payload), completion, payload)
@@ -423,7 +440,9 @@ func (s *RunStore) Fail(ctx context.Context, id, workerID, leaseToken string, f 
 	data, _ := json.Marshal(f)
 	res, err := s.db.ExecContext(ctx, `UPDATE mitigation_check_run SET
 	status='failed',terminal_state='malfunction',failure=$3,completed_at=now(),updated_at=now(),progress_phase='failed',
-	progress_message=$4,worker_id=NULL,lease_token=NULL,lease_expires_at=NULL WHERE run_id=$1 AND worker_id=$2
+	progress_message=$4,callback_state=CASE WHEN callback_url IS NULL THEN callback_state ELSE 'pending' END,
+	callback_next_at=CASE WHEN callback_url IS NULL THEN callback_next_at ELSE now() END,
+	worker_id=NULL,lease_token=NULL,lease_expires_at=NULL WHERE run_id=$1 AND worker_id=$2
 	AND lease_token=$5 AND status='running' AND lease_expires_at>now()`, id, workerID, data, f.Detail, leaseToken)
 	if err != nil {
 		return false, err
@@ -443,7 +462,10 @@ func (s *RunStore) FailOutcome(ctx context.Context, id, workerID, leaseToken str
 	}
 	res, err := s.db.ExecContext(ctx, `UPDATE mitigation_check_run SET status='failed',
 		terminal_state='malfunction',match=$4,response=$5,failure=$6,completed_at=now(),updated_at=now(),
-		progress_phase='failed',progress_message=$7,worker_id=NULL,lease_token=NULL,lease_expires_at=NULL
+		progress_phase='failed',progress_message=$7,
+		callback_state=CASE WHEN callback_url IS NULL THEN callback_state ELSE 'pending' END,
+		callback_next_at=CASE WHEN callback_url IS NULL THEN callback_next_at ELSE now() END,
+		worker_id=NULL,lease_token=NULL,lease_expires_at=NULL
 		WHERE run_id=$1 AND worker_id=$2 AND lease_token=$3 AND status='running' AND cancel_requested=FALSE
 		AND lease_expires_at>now()`, id, workerID, leaseToken, out.Match, result, failure, f.Detail)
 	if err != nil {
@@ -455,14 +477,21 @@ func (s *RunStore) FailOutcome(ctx context.Context, id, workerID, leaseToken str
 
 func (s *RunStore) FailExhausted(ctx context.Context, max int) error {
 	data, _ := json.Marshal(RunFailure{Code: "worker_attempts_exhausted", Detail: "Worker lease expired and the attempt limit was reached", Retryable: false})
-	_, err := s.db.ExecContext(ctx, `UPDATE mitigation_check_run SET status='failed',terminal_state='malfunction',failure=$2,completed_at=now(),updated_at=now(),progress_phase='failed',progress_message='Worker attempt limit reached',worker_id=NULL,lease_token=NULL,lease_expires_at=NULL WHERE status='running' AND cancel_requested=FALSE AND response='{}'::jsonb AND lease_expires_at<=now() AND attempt>=$1`, max, data)
+	_, err := s.db.ExecContext(ctx, `UPDATE mitigation_check_run SET status='failed',terminal_state='malfunction',failure=$2,
+		completed_at=now(),updated_at=now(),progress_phase='failed',progress_message='Worker attempt limit reached',
+		callback_state=CASE WHEN callback_url IS NULL THEN callback_state ELSE 'pending' END,
+		callback_next_at=CASE WHEN callback_url IS NULL THEN callback_next_at ELSE now() END,
+		worker_id=NULL,lease_token=NULL,lease_expires_at=NULL WHERE status='running' AND cancel_requested=FALSE
+		AND response='{}'::jsonb AND lease_expires_at<=now() AND attempt>=$1`, max, data)
 	return err
 }
 
 func (s *RunStore) RecoverCanceled(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE mitigation_check_run SET status='canceled',terminal_state='canceled',
 		completed_at=now(),updated_at=now(),progress_phase='canceled',progress_message='Cancellation recovered after worker lease expiry',
-		publication_pending=FALSE,worker_id=NULL,lease_token=NULL,lease_expires_at=NULL WHERE status='running' AND cancel_requested=TRUE
+		publication_pending=FALSE,callback_state=CASE WHEN callback_url IS NULL THEN callback_state ELSE 'pending' END,
+		callback_next_at=CASE WHEN callback_url IS NULL THEN callback_next_at ELSE now() END,
+		worker_id=NULL,lease_token=NULL,lease_expires_at=NULL WHERE status='running' AND cancel_requested=TRUE
 		AND publication_pending=FALSE AND lease_expires_at<=now()`)
 	return err
 }
@@ -473,6 +502,8 @@ func (s *RunStore) Cancel(ctx context.Context, id string) (DurableRun, error) {
 	terminal_state=CASE WHEN status='queued' AND publication_pending=FALSE THEN 'canceled' ELSE terminal_state END,
 	completed_at=CASE WHEN status='queued' AND publication_pending=FALSE THEN now() ELSE completed_at END,
 	updated_at=CASE WHEN status IN ('queued','running') THEN now() ELSE updated_at END,
+	callback_state=CASE WHEN status='queued' AND publication_pending=FALSE AND callback_url IS NOT NULL THEN 'pending' ELSE callback_state END,
+	callback_next_at=CASE WHEN status='queued' AND publication_pending=FALSE AND callback_url IS NOT NULL THEN now() ELSE callback_next_at END,
 	progress_phase=CASE WHEN status='queued' AND publication_pending=FALSE THEN 'canceled' WHEN publication_pending=TRUE THEN 'verifying' ELSE 'canceling' END,
 	progress_message=CASE WHEN status='queued' AND publication_pending=FALSE THEN 'Canceled before execution' WHEN publication_pending=TRUE THEN 'Verifying immutable result publication; cancellation cutoff has passed' ELSE 'Cancellation requested' END
 	WHERE run_id=$1 AND status IN ('queued','running')`, id)
@@ -483,7 +514,12 @@ func (s *RunStore) Cancel(ctx context.Context, id string) (DurableRun, error) {
 }
 
 func (s *RunStore) MarkCanceled(ctx context.Context, id, workerID, leaseToken string) (bool, error) {
-	res, err := s.db.ExecContext(ctx, `UPDATE mitigation_check_run SET status='canceled',terminal_state='canceled',completed_at=now(),updated_at=now(),progress_phase='canceled',progress_message='Cancellation completed',publication_pending=FALSE,worker_id=NULL,lease_token=NULL,lease_expires_at=NULL WHERE run_id=$1 AND worker_id=$2 AND lease_token=$3 AND status='running' AND cancel_requested=TRUE AND publication_pending=FALSE`, id, workerID, leaseToken)
+	res, err := s.db.ExecContext(ctx, `UPDATE mitigation_check_run SET status='canceled',terminal_state='canceled',
+		completed_at=now(),updated_at=now(),progress_phase='canceled',progress_message='Cancellation completed',publication_pending=FALSE,
+		callback_state=CASE WHEN callback_url IS NULL THEN callback_state ELSE 'pending' END,
+		callback_next_at=CASE WHEN callback_url IS NULL THEN callback_next_at ELSE now() END,
+		worker_id=NULL,lease_token=NULL,lease_expires_at=NULL WHERE run_id=$1 AND worker_id=$2 AND lease_token=$3
+		AND status='running' AND cancel_requested=TRUE AND publication_pending=FALSE`, id, workerID, leaseToken)
 	if err != nil {
 		return false, err
 	}
@@ -515,6 +551,8 @@ func (s *RunStore) RetryVerification(ctx context.Context, id, workerID, leaseTok
 		progress_message=CASE WHEN verification_attempt+1>=$4 THEN $7 ELSE 'Waiting to retry immutable result verification' END,
 		publication_pending=CASE WHEN verification_attempt+1>=$4 THEN FALSE ELSE TRUE END,
 		publication_retry_at=CASE WHEN verification_attempt+1>=$4 THEN NULL ELSE now()+$5::interval END,
+		callback_state=CASE WHEN verification_attempt+1>=$4 AND callback_url IS NOT NULL THEN 'pending' ELSE callback_state END,
+		callback_next_at=CASE WHEN verification_attempt+1>=$4 AND callback_url IS NOT NULL THEN now() ELSE callback_next_at END,
 		worker_id=NULL,lease_token=NULL,lease_expires_at=NULL
 		WHERE run_id=$1 AND worker_id=$2 AND lease_token=$3 AND status='running' AND publication_pending=TRUE
 		AND lease_expires_at>now()`, id, workerID, leaseToken, maxAttempts, interval(delay), failure, f.Detail)
@@ -529,7 +567,9 @@ func (s *RunStore) FailPublicationConflict(ctx context.Context, id, workerID, le
 	failure, _ := json.Marshal(f)
 	res, err := s.db.ExecContext(ctx, `UPDATE mitigation_check_run SET status='failed',terminal_state='malfunction',
 		failure=$4,completed_at=now(),updated_at=now(),progress_phase='failed',progress_message=$5,
-		publication_pending=FALSE,worker_id=NULL,lease_token=NULL,lease_expires_at=NULL
+		publication_pending=FALSE,callback_state=CASE WHEN callback_url IS NULL THEN callback_state ELSE 'pending' END,
+		callback_next_at=CASE WHEN callback_url IS NULL THEN callback_next_at ELSE now() END,
+		worker_id=NULL,lease_token=NULL,lease_expires_at=NULL
 		WHERE run_id=$1 AND worker_id=$2 AND lease_token=$3 AND status='running' AND lease_expires_at>now()`,
 		id, workerID, leaseToken, failure, f.Detail)
 	if err != nil {
@@ -584,34 +624,79 @@ func validateCanonicalResultPayload(out RunOutcome, payload []byte) error {
 }
 
 type CallbackDelivery struct {
-	Run     DurableRun
-	Attempt int
+	Run        DurableRun
+	Attempt    int
+	LeaseToken string
 }
 
-func (s *RunStore) NextCallback(ctx context.Context) (CallbackDelivery, bool, error) {
+func (s *RunStore) ClaimNextCallback(ctx context.Context, lease time.Duration) (CallbackDelivery, bool, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return CallbackDelivery{}, false, err
+	}
+	defer func() { _ = tx.Rollback() }()
 	var id string
-	err := s.db.QueryRowContext(ctx, `SELECT run_id FROM mitigation_check_run WHERE status IN ('completed','failed','canceled') AND callback_url IS NOT NULL AND callback_delivered_at IS NULL AND callback_next_at<=now() ORDER BY callback_next_at LIMIT 1`).Scan(&id)
+	var attempt int
+	err = tx.QueryRowContext(ctx, `SELECT run_id,callback_attempt FROM mitigation_check_run
+		WHERE status IN ('completed','failed','canceled') AND callback_url IS NOT NULL
+		AND callback_state IN ('pending','retry','delivering') AND callback_next_at<=now()
+		AND (callback_lease_expires_at IS NULL OR callback_lease_expires_at<=now())
+		ORDER BY callback_next_at,created_at FOR UPDATE SKIP LOCKED LIMIT 1`).Scan(&id, &attempt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return CallbackDelivery{}, false, nil
 	}
 	if err != nil {
 		return CallbackDelivery{}, false, err
 	}
-	run, err := s.GetDurable(ctx, id)
+	leaseToken := newID()
+	if _, err := tx.ExecContext(ctx, `UPDATE mitigation_check_run SET callback_state='delivering',
+		callback_lease_token=$2,callback_lease_expires_at=now()+$3::interval WHERE run_id=$1`, id, leaseToken, interval(lease)); err != nil {
+		return CallbackDelivery{}, false, err
+	}
+	run, err := getDurable(ctx, tx, "run_id", id)
 	if err != nil {
 		return CallbackDelivery{}, false, err
 	}
-	var n int
-	_ = s.db.QueryRowContext(ctx, `SELECT callback_attempt FROM mitigation_check_run WHERE run_id=$1`, id).Scan(&n)
-	return CallbackDelivery{run, n}, true, nil
+	if err := tx.Commit(); err != nil {
+		return CallbackDelivery{}, false, err
+	}
+	return CallbackDelivery{Run: run, Attempt: attempt, LeaseToken: leaseToken}, true, nil
 }
-func (s *RunStore) CallbackSucceeded(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE mitigation_check_run SET callback_delivered_at=now(),callback_attempt=callback_attempt+1 WHERE run_id=$1`, id)
-	return err
+
+func (s *RunStore) CallbackSucceeded(ctx context.Context, id, leaseToken string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE mitigation_check_run SET callback_state='delivered',callback_delivered_at=now(),
+		callback_attempt=callback_attempt+1,callback_last_error=NULL,callback_lease_token=NULL,callback_lease_expires_at=NULL
+		WHERE run_id=$1 AND callback_state='delivering' AND callback_lease_token=$2`, id, leaseToken)
+	return requireCallbackUpdate(res, err)
 }
-func (s *RunStore) CallbackFailed(ctx context.Context, id string, delay time.Duration) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE mitigation_check_run SET callback_attempt=callback_attempt+1,callback_next_at=now()+$2::interval WHERE run_id=$1`, id, interval(delay))
-	return err
+
+func (s *RunStore) CallbackFailed(ctx context.Context, id, leaseToken string, delay time.Duration, reason string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE mitigation_check_run SET callback_state='retry',callback_attempt=callback_attempt+1,
+		callback_next_at=now()+$3::interval,callback_last_error=$4,callback_lease_token=NULL,callback_lease_expires_at=NULL
+		WHERE run_id=$1 AND callback_state='delivering' AND callback_lease_token=$2`, id, leaseToken, interval(delay), reason)
+	return requireCallbackUpdate(res, err)
+}
+
+func (s *RunStore) CallbackConfigurationFailed(ctx context.Context, id, leaseToken, reason string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE mitigation_check_run SET callback_state='configuration_failed',
+		callback_attempt=callback_attempt+1,callback_configuration_failed_at=now(),callback_last_error=$3,
+		callback_lease_token=NULL,callback_lease_expires_at=NULL
+		WHERE run_id=$1 AND callback_state='delivering' AND callback_lease_token=$2`, id, leaseToken, reason)
+	return requireCallbackUpdate(res, err)
+}
+
+func requireCallbackUpdate(result sql.Result, err error) error {
+	if err != nil {
+		return err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if updated != 1 {
+		return fmt.Errorf("callback delivery lease is no longer owned")
+	}
+	return nil
 }
 
 func nullable(v string) any {

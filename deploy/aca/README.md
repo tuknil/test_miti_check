@@ -7,6 +7,8 @@ with the `az` CLI.
 
 ```bash
 DATABASE_URL='postgres://mc:pass@myserver.postgres.database.azure.com:5432/mitigation?sslmode=require' \
+CAPABILITY_CALLBACK_TOKEN='<shared-secret>' \
+CAPABILITY_CALLBACK_ALLOWED_HOSTS='orchestration-api.example.com' \
 RG=mc-nonprod-rg LOCATION=eastus \
   ./deploy.sh
 ```
@@ -40,8 +42,8 @@ environment, apps, and (for `aci` mode) a role assignment.
 ## What the script sets up
 
 - **API** container app — external ingress on `8137`, a **system-assigned managed
-  identity**, `DATABASE_URL` as a secret, and the `MC_ACI_*` / `AZURE_SUBSCRIPTION_ID`
-  env for ACI substrates.
+  identity**, `DATABASE_URL` and `CAPABILITY_CALLBACK_TOKEN` as secret references,
+  and the `MC_ACI_*` / `AZURE_SUBSCRIPTION_ID` env for ACI substrates.
 - **Managed-identity RBAC:** the API identity gets **Contributor on the ACI
   resource group** so `aci` mode can create/delete container groups.
 - Optional secrets for **`github`/`github-ghcr`** (`GITHUB_REPO`, `GITHUB_TOKEN`)
@@ -62,6 +64,17 @@ environment, allow egress to:
 | `inmemory` | none |
 
 Plus the Postgres host in all cases.
+Callback-enabled runs additionally need HTTPS egress to the allowlisted
+orchestration API hostname.
+
+## Callback acceptance evidence
+
+After deployment, capture the ACA revision name and image digest, confirm
+`CAPABILITY_CALLBACK_TOKEN=secretref:capability-callback-token`, and retain one
+redacted `callback_metadata_accepted` log plus one `202 Accepted` callback trace.
+Record the event ID, capability run ID, request ID, correlation ID, Temporal
+child workflow ID, and a polling-only completion trace. The full checklist is in
+[`mitigation-check-lld.md`](../../mitigation-check-lld.md#10-acceptance-evidence).
 
 ## Notes / caveats
 
