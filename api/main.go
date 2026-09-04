@@ -41,21 +41,30 @@ const maxBodyBytes = 64 * 1024
 // `substrate` / `candidate` / `test_basis` objects carry the actual artifact
 // content (container image, WAF rule, attack test) so a run is self-describing.
 type SubmitMitigationCheckRequest struct {
-	ContractID          string          `json:"contract_id"`
-	RequestID           string          `json:"request_id,omitempty"`
-	CandidateArtifactID string          `json:"candidate_artifact_id"`
-	TestBasisID         string          `json:"test_basis_id"`
-	SubstrateSelector   string          `json:"substrate_selector,omitempty"`
-	CheckProfileID      string          `json:"check_profile_id"`
-	Substrate           json.RawMessage `json:"substrate,omitempty"`
-	Candidate           json.RawMessage `json:"candidate,omitempty"`
-	TestBasis           json.RawMessage `json:"test_basis,omitempty"`
+	ContractID          string `json:"contract_id"`
+	RequestID           string `json:"request_id,omitempty"`
+	CandidateArtifactID string `json:"candidate_artifact_id"`
+	// TestBasisID is an executable reference in inline mode. In reference-only
+	// mode it is a non-executable selector that must exactly identify an eligible
+	// artifact inside the verified Check Generation result.
+	TestBasisID       string          `json:"test_basis_id"`
+	SubstrateSelector string          `json:"substrate_selector,omitempty"`
+	CheckProfileID    string          `json:"check_profile_id"`
+	Substrate         json.RawMessage `json:"substrate,omitempty"`
+	Candidate         json.RawMessage `json:"candidate,omitempty"`
+	TestBasis         json.RawMessage `json:"test_basis,omitempty"`
 	// ExecutionMode selects the substrate adapter. Defaults to "inmemory" when
 	// omitted; other values include "local" (docker), "aci"/"aci-sp", "github",
 	// "github-ghcr", and "firewall".
 	ExecutionMode string `json:"execution_mode,omitempty"`
 	// CorrelationID is echoed into the result envelope (optional).
 	CorrelationID string `json:"correlation_id,omitempty"`
+	// Reference-only mode is additive and mutually exclusive with inline artifacts
+	// and legacy upstream_inputs. Both immutable producer locators are resolved and
+	// verified only when this mode is selected.
+	RoutePolicy   string                  `json:"route_policy,omitempty"`
+	DefenseResult *ImmutableResultLocator `json:"defense_result,omitempty"`
+	CheckResult   *ImmutableResultLocator `json:"check_result,omitempty"`
 
 	// --- Upstream defense-generation payload (new input contract) ---
 	// The mitigation rule is taken from primary_candidate.artifact_content. The
@@ -383,12 +392,7 @@ func handleSubmitRunSync(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := executionContext(r.Context())
 	defer cancel()
 
-	var outcome RunOutcome
-	if upstreamInputMode {
-		outcome = executeScenarioUpstream(ctx, req, runID, resultID)
-	} else {
-		outcome = executeScenario(ctx, req, runID, resultID)
-	}
+	outcome := executeRequestedScenario(ctx, req, runID, resultID)
 	enrichEnvelope(&outcome, req.CorrelationID)
 	outcome.CreatedAt = time.Now().UTC()
 	if err := setCanonicalIntegrity(&outcome); err != nil {
@@ -480,6 +484,9 @@ func validate(req SubmitMitigationCheckRequest) []string {
 	// the legacy reference ids are not required and the upstream contract is accepted.
 	if req.ContractID != contractID {
 		bad = append(bad, "contract_id")
+	}
+	if locatorMode(req) {
+		return append(bad, validateLocatorRequest(req)...)
 	}
 	if strings.TrimSpace(req.CandidateArtifactID) == "" {
 		bad = append(bad, "candidate_artifact_id")

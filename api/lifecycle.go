@@ -305,12 +305,7 @@ func executeDurableRun(ctx context.Context, run DurableRun) (RunOutcome, error) 
 	}
 	ctx, cancel := executionContext(ctx)
 	defer cancel()
-	var out RunOutcome
-	if upstreamInputMode && len(req.UpstreamInputs) > 0 {
-		out = executeScenarioUpstream(ctx, req, run.RunID, *run.ResultID)
-	} else {
-		out = executeScenario(ctx, req, run.RunID, *run.ResultID)
-	}
+	out := executeRequestedScenario(ctx, req, run.RunID, *run.ResultID)
 	out.RequestID = run.RequestID
 	out.RequestSHA256 = run.RequestDigest
 	if len(req.UpstreamInputs) > 0 {
@@ -323,6 +318,16 @@ func executeDurableRun(ctx context.Context, run DurableRun) (RunOutcome, error) 
 		return RunOutcome{}, err
 	}
 	return out, nil
+}
+
+func executeRequestedScenario(ctx context.Context, req SubmitMitigationCheckRequest, runID, resultID string) RunOutcome {
+	if locatorMode(req) {
+		return executeScenarioByLocator(ctx, req, runID, resultID)
+	}
+	if upstreamInputMode && len(req.UpstreamInputs) > 0 {
+		return executeScenarioUpstream(ctx, req, runID, resultID)
+	}
+	return executeScenario(ctx, req, runID, resultID)
 }
 
 func setCanonicalIntegrity(out *RunOutcome) error {

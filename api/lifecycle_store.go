@@ -215,7 +215,7 @@ func (s *RunStore) CreateOrGet(ctx context.Context, run DurableRun) (DurableRun,
 		 correlation_id,request_digest,status,updated_at,progress_phase,progress_message,
 			 callback_url,callback_workflow_id,callback_signal,callback_event_id,callback_state,callback_next_at)
 		VALUES($1,$2,'',FALSE,$3,$4,'{}',$5,$6,$7,'queued',$3,'queued','Awaiting worker',$8,$9,$10,$11,
-		       CASE WHEN $8 IS NULL THEN NULL ELSE 'waiting' END,$3)
+		       CASE WHEN $8::text IS NULL THEN NULL ELSE 'waiting' END,$3)
 		ON CONFLICT (request_id) WHERE request_id IS NOT NULL DO NOTHING`, run.RunID,
 		*run.ResultID, run.CreatedAt, []byte(run.Request), run.RequestID, run.CorrelationID,
 		run.RequestDigest, nullable(run.CallbackURL), nullable(run.CallbackWorkflowID), nullable(run.CallbackSignal), nullable(run.CallbackEventID))

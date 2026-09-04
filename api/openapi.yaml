@@ -257,7 +257,10 @@ components:
     SubmitMitigationCheckRequest:
       type: object
       additionalProperties: false
-      required: [contract_id, candidate_artifact_id, test_basis_id, check_profile_id]
+      required: [contract_id]
+      oneOf:
+        - required: [candidate_artifact_id, test_basis_id, check_profile_id]
+        - required: [request_id, correlation_id, route_policy, defense_result, check_result]
       properties:
         contract_id:
           type: string
@@ -273,7 +276,12 @@ components:
         test_basis_id:
           type: string
           minLength: 1
-          description: Attack / discriminator sample reference.
+          description: >
+            Attack/discriminator reference in inline mode. In reference-only
+            mode this is an optional non-executable selector. When supplied it
+            must exactly equal the artifact_id of an eligible
+            mitigation-checkable-signal HTTP artifact in the verified Check
+            Generation result; no fallback artifact is selected on mismatch.
         check_profile_id:
           type: string
           minLength: 1
@@ -303,6 +311,22 @@ components:
             Must equal X-Correlation-ID. May be omitted during migration and is
             then populated from that required header.
           example: "mc-request:CVE-2021-44228:waf:1"
+        route_policy:
+          type: string
+          enum: [registered-waf-route-v1]
+          description: >
+            Selects strict reference-only hydration and the registered WAF
+            route mapping. The request may include test_basis_id as an exact
+            non-executable artifact selector, but may not include executable
+            candidate or test bodies.
+        defense_result:
+          allOf:
+            - $ref: "#/components/schemas/ImmutableResultLocator"
+          description: Immutable Defense Generation result locator. Required only in reference-only mode.
+        check_result:
+          allOf:
+            - $ref: "#/components/schemas/ImmutableResultLocator"
+          description: Immutable Check Generation result locator. Required only in reference-only mode.
         substrate:
           $ref: "#/components/schemas/SubstrateSpec"
         candidate:
@@ -432,8 +456,29 @@ components:
               example: "defense-generation-result:c3b02e61c65fb24b3fa16aaf"
         evidence_refs:
           type: array
+          description: >
+            Stable deduplicated lineage from the verified Defense Generation
+            candidate/result and Check Generation completion.
           items:
             type: string
+
+    ImmutableResultLocator:
+      type: object
+      additionalProperties: false
+      required: [capability, contract_id, request_id, correlation_id, run_id, result_id, status, terminal_state, result_ref, content_sha256, size_bytes, created_at]
+      properties:
+        capability: { type: string, enum: [defense-generation, check-generation] }
+        contract_id: { type: string, enum: [defense-generation-result@1.0, check-generation-result@1.0] }
+        request_id: { type: string, minLength: 1 }
+        correlation_id: { type: string, minLength: 1 }
+        run_id: { type: string, minLength: 1 }
+        result_id: { type: string, minLength: 1 }
+        status: { type: string, enum: [completed] }
+        terminal_state: { type: string, enum: [candidate-produced, completed] }
+        result_ref: { $ref: "#/components/schemas/ResultRef" }
+        content_sha256: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
+        size_bytes: { type: integer, minimum: 1, maximum: 209715200 }
+        created_at: { type: string, format: date-time }
 
     SubstrateSpec:
       type: object
@@ -566,6 +611,16 @@ components:
           description: Exact authoritative upstream result identities used for this check.
           items:
             $ref: "#/components/schemas/UpstreamInput"
+        input_provenance:
+          type: object
+          additionalProperties: false
+          required: [route_policy, defense_result, check_result, selected_test_basis_id, verification]
+          properties:
+            route_policy: { type: string, enum: [registered-waf-route-v1] }
+            defense_result: { $ref: "#/components/schemas/ImmutableResultLocator" }
+            check_result: { $ref: "#/components/schemas/ImmutableResultLocator" }
+            selected_test_basis_id: { type: string }
+            verification: { type: string, enum: [physical-and-logical-sha256-verified] }
         match:
           type: boolean
           description: Whether actual.blocked equals expected.blocked.

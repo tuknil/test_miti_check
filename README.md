@@ -35,6 +35,27 @@ and `upstream_inputs` is present. Omitted `execution_mode`, request method,
 request path, and request headers are normalized to `inmemory`, `GET`, `/`, and
 an empty object before the idempotency digest is calculated.
 
+An additive reference-only mode accepts no executable inline content. It requires
+`route_policy: registered-waf-route-v1` and exactly two complete immutable
+locators in `defense_result` and `check_result`. The resolver directly queries
+only `36889_janus_dev.defense_generation.defense_generation_results` and
+`36889_janus_dev.check_generation.check_generation_results`, requires exactly
+one row from each, verifies row and logical-result identity and SHA-256 metadata,
+and hydrates a Check Generation payload only from the fixed managed Volume
+`/Volumes/36889_janus_dev/check_generation/payloads`. A supplied `test_basis_id`
+is a non-executable selector and must exactly identify an eligible
+`mitigation-checkable-signal` HTTP artifact; when omitted, the first eligible
+artifact is selected. The resolver verifies the complete current Defense
+Generation canonical producer shape, including fully populated upstream result
+references, checks `primary_candidate.artifact_hash` against the exact artifact
+content, and validates the Check Generation persisted wrapper plus strict
+completion/result contract versions. Both verified locators and the selected
+artifact ID are retained in result `input_provenance`, while verified producer
+evidence lineage is stably deduplicated into result `evidence_refs`. Locator SQL
+queries have a fixed 60-second deadline. Databricks input resolution is created
+only when a reference-only run executes; inline and local startup remain usable
+without Databricks input configuration.
+
 Completed results are staged in PostgreSQL before external publication. The
 Databricks writer uses an insert-only `MERGE` keyed by `result_id`, then reads the
 row back and requires exact `run_id` and JSON equality. Recovery republishes the
@@ -69,7 +90,9 @@ expired `running -> failed|canceled` during recovery. Terminal states are
 immutable.
 
 The existing executor and UI remain available through the clearly separate,
-deprecated synchronous path `POST /v1/compat/mitigation-check-runs`.
+deprecated synchronous path `POST /v1/compat/mitigation-check-runs`. Enabling
+`MC_INPUT_UPSTREAM` does not reroute an inline compatibility request unless that
+request actually contains `upstream_inputs`.
 
 ## Step 1 — Submit a mitigation-check run
 
