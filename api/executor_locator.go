@@ -465,12 +465,20 @@ func (r *databricksLocatorResolver) verifyCheckRow(ctx context.Context, row chec
 	if err != nil {
 		return nil, nil, fmt.Errorf("canonicalize Check Generation result_json: %w", err)
 	}
-	if sha256Value(physical) != row.ResultSHA256 || int64(len(physical)) != row.ResultSizeBytes {
+	var manifest volumeManifest
+	isManifest := json.Unmarshal(physical, &manifest) == nil && manifest.ContractType == "janus-volume-payload-manifest"
+	physicalMatches := sha256Value(physical) == row.ResultSHA256 && int64(len(physical)) == row.ResultSizeBytes
+	// Inline Python payloads are stored as Databricks VARIANT. TO_JSON may
+	// normalize numeric lexical forms, so authoritative cross-capability
+	// verification uses the logical RFC 8785 digest reconstructed below.
+	if !physicalMatches && isManifest {
 		return nil, nil, fmt.Errorf("Check Generation physical result integrity verification failed")
 	}
+	if !physicalMatches && (!validSHA256(row.ResultSHA256) || row.ResultSizeBytes <= 0) {
+		return nil, nil, fmt.Errorf("Check Generation physical result integrity metadata is invalid")
+	}
 	payload := physical
-	var manifest volumeManifest
-	if json.Unmarshal(physical, &manifest) == nil && manifest.ContractType == "janus-volume-payload-manifest" {
+	if isManifest {
 		if err := validateManifestShape(physical); err != nil {
 			return nil, nil, fmt.Errorf("Check Generation Volume manifest: %w", err)
 		}
