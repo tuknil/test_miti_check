@@ -541,7 +541,20 @@ func (r *databricksLocatorResolver) verifyCheckRow(ctx context.Context, row chec
 	if err != nil {
 		return nil, nil, err
 	}
-	if sha256Value(logical) != locator.ContentSHA256 || int64(len(logical)) != locator.SizeBytes {
+	logicalMatches := sha256Value(logical) == locator.ContentSHA256 && int64(len(logical)) == locator.SizeBytes
+	if !logicalMatches {
+		// The Python producer hashes its pre-validation ISO timestamp with
+		// +00:00; Pydantic serializes the completion projection with Z.
+		if createdAt, ok := core["created_at"].(string); ok && strings.HasSuffix(createdAt, "Z") {
+			core["created_at"] = strings.TrimSuffix(createdAt, "Z") + "+00:00"
+			logical, err = marshalRFC8785(core)
+			if err != nil {
+				return nil, nil, err
+			}
+			logicalMatches = sha256Value(logical) == locator.ContentSHA256 && int64(len(logical)) == locator.SizeBytes
+		}
+	}
+	if !logicalMatches {
 		return nil, nil, fmt.Errorf("Check Generation logical result integrity verification failed")
 	}
 	if !sameTimestamp(stringValue(core["created_at"]), locator.CreatedAt) || !sameTimestamp(row.CreatedAt, locator.CreatedAt) {
