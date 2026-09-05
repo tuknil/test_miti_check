@@ -16,10 +16,36 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/big"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 )
+
+// IntegralSeconds accepts equivalent JSON integer forms such as 5 and 5.0.
+// Databricks VARIANT may normalize a producer integer to a decimal lexical form.
+type IntegralSeconds int
+
+func (seconds *IntegralSeconds) UnmarshalJSON(data []byte) error {
+	value, ok := new(big.Rat).SetString(strings.TrimSpace(string(data)))
+	if !ok {
+		return fmt.Errorf("timeout_seconds must be a number")
+	}
+	if !value.IsInt() || value.Sign() < 0 {
+		return fmt.Errorf("timeout_seconds must be a non-negative integer")
+	}
+	integer := value.Num()
+	if !integer.IsInt64() {
+		return fmt.Errorf("timeout_seconds is outside the supported integer range")
+	}
+	parsed := integer.Int64()
+	if strconv.IntSize == 32 && parsed > int64(^uint32(0)>>1) {
+		return fmt.Errorf("timeout_seconds is outside the supported integer range")
+	}
+	*seconds = IntegralSeconds(int(parsed))
+	return nil
+}
 
 // Stimulus is the upstream http-probe stimulus.
 type Stimulus struct {
@@ -31,7 +57,7 @@ type Stimulus struct {
 	JSONBody            json.RawMessage   `json:"json_body"`
 	BodyText            *string           `json:"body_text"`
 	ContentType         *string           `json:"content_type"`
-	TimeoutSeconds      int               `json:"timeout_seconds"`
+	TimeoutSeconds      IntegralSeconds   `json:"timeout_seconds"`
 	VulnerablePredicate string            `json:"vulnerable_predicate"`
 	VulnerableMarker    string            `json:"vulnerable_marker"`
 	BaselinePredicate   string            `json:"baseline_predicate"`
