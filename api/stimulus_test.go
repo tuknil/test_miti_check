@@ -33,6 +33,31 @@ func TestParseStimulusFromArtifacts(t *testing.T) {
 	}
 }
 
+func TestStimulusAcceptsEquivalentIntegralTimeoutForms(t *testing.T) {
+	for _, encoded := range []string{"5", "5.0", "5e0"} {
+		t.Run(encoded, func(t *testing.T) {
+			var stimulus Stimulus
+			if err := json.Unmarshal([]byte(`{"timeout_seconds":`+encoded+`}`), &stimulus); err != nil {
+				t.Fatalf("unmarshal timeout %s: %v", encoded, err)
+			}
+			if int(stimulus.TimeoutSeconds) != 5 {
+				t.Fatalf("timeout_seconds = %d, want 5", stimulus.TimeoutSeconds)
+			}
+		})
+	}
+}
+
+func TestStimulusRejectsInvalidTimeoutForms(t *testing.T) {
+	for _, encoded := range []string{"5.5", "-1", "1e100", `"5"`, "null"} {
+		t.Run(encoded, func(t *testing.T) {
+			var stimulus Stimulus
+			if err := json.Unmarshal([]byte(`{"timeout_seconds":`+encoded+`}`), &stimulus); err == nil {
+				t.Fatalf("unmarshal timeout %s unexpectedly succeeded", encoded)
+			}
+		})
+	}
+}
+
 // The exact example stimulus from the input probe.
 const exampleStimulus = `{
   "stimulus": {
