@@ -53,14 +53,16 @@ type RunOutcome struct {
 	Expected  Expected `json:"expected"`
 	Actual    Actual   `json:"actual"`
 	Substrate SubInfo  `json:"substrate"`
-	// Candidate and TestBasis carry the actual mitigation rule and the test that
-	// were run, so a mitigation_check row is self-contained — downstream consumers
-	// need not query the upstream tables the rule/test were sourced from.
-	Candidate     *CandidateSpec `json:"candidate,omitempty"`
-	TestBasis     *TestBasisSpec `json:"test_basis,omitempty"`
-	Steps         []string       `json:"steps"`
-	ProseSummary  string         `json:"prose_summary"`
-	Limitations   []string       `json:"limitations,omitempty"`
+	// Candidate/TestBasis (the resolved rule and test) and the execution
+	// diagnostics (Steps/ProseSummary/Limitations) are computed during execution
+	// but excluded from the result payload (json:"-"): the result carries only the
+	// envelope + verdict. A downstream consumer that needs the rule/test resolves
+	// it via result_ref (the upstream defense-generation / check-generation rows).
+	Candidate     *CandidateSpec `json:"-"`
+	TestBasis     *TestBasisSpec `json:"-"`
+	Steps         []string       `json:"-"`
+	ProseSummary  string         `json:"-"`
+	Limitations   []string       `json:"-"`
 	ContentSHA256 string         `json:"content_sha256,omitempty"`
 	SizeBytes     int64          `json:"size_bytes,omitempty"`
 	CreatedAt     time.Time      `json:"created_at"`
