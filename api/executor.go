@@ -35,18 +35,18 @@ import (
 // MitigationCheckResult@1, LLD §10.2). The leading fields are the result envelope;
 // the trailing fields are the full verdict detail (appended, not replaced).
 type RunOutcome struct {
-	Capability     string          `json:"capability"`
-	ContractID     string          `json:"contract_id"`
-	RequestID      string          `json:"request_id"`
-	RunID          string          `json:"run_id"`
-	ResultID       string          `json:"result_id"`
-	TerminalState  string          `json:"terminal_state"`
-	Status         string          `json:"status"`
-	CorrelationID  string          `json:"correlation_id,omitempty"`
-	ResultRef      *ResultRef      `json:"result_ref,omitempty"`
-	EvidenceRefs   []string        `json:"evidence_refs"`
-	RequestSHA256  string          `json:"request_sha256"`
-	UpstreamInputs json.RawMessage `json:"upstream_inputs,omitempty"`
+	Capability      string             `json:"capability"`
+	ContractID      string             `json:"contract_id"`
+	RequestID       string             `json:"request_id"`
+	RunID           string             `json:"run_id"`
+	ResultID        string             `json:"result_id"`
+	TerminalState   string             `json:"terminal_state"`
+	Status          string             `json:"status"`
+	CorrelationID   string             `json:"correlation_id,omitempty"`
+	ResultRef       *ResultRef         `json:"result_ref,omitempty"`
+	EvidenceRefs    []string           `json:"evidence_refs"`
+	RequestSHA256   string             `json:"request_sha256"`
+	UpstreamInputs  json.RawMessage    `json:"upstream_inputs,omitempty"`
 	InputProvenance *LocatorProvenance `json:"input_provenance,omitempty"`
 
 	Match     bool     `json:"match"`
@@ -267,8 +267,10 @@ func executeScenario(ctx context.Context, req SubmitMitigationCheckRequest, runI
 		out.TerminalState = stateNotBlocked
 	}
 
-	// 4. Actual vs expected.
-	out.Match = out.Actual.Blocked == out.Expected.Blocked
+	// 4. A match requires an actual block. If the request was not blocked, match is
+	// false regardless of the expected outcome (a not-blocked result never counts as
+	// a match); when blocked, it must still agree with the expected outcome.
+	out.Match = out.Actual.Blocked && (out.Actual.Blocked == out.Expected.Blocked)
 	out.ProseSummary = summarize(out)
 	if test.ProofBasis == "mitigation-discriminator" && out.TerminalState == stateBlocked {
 		out.Limitations = append(out.Limitations, "indirect proof: only discriminator behavior was proven blocked (LLD §7.3)")
