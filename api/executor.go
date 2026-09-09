@@ -53,16 +53,15 @@ type RunOutcome struct {
 	Expected  Expected `json:"expected"`
 	Actual    Actual   `json:"actual"`
 	Substrate SubInfo  `json:"substrate"`
-	// Candidate/TestBasis (the resolved rule and test) and the execution
-	// diagnostics (Steps/ProseSummary/Limitations) are computed during execution
-	// but excluded from the result payload (json:"-"): the result carries only the
-	// envelope + verdict. A downstream consumer that needs the rule/test resolves
-	// it via result_ref (the upstream defense-generation / check-generation rows).
-	Candidate     *CandidateSpec `json:"-"`
-	TestBasis     *TestBasisSpec `json:"-"`
-	Steps         []string       `json:"-"`
-	ProseSummary  string         `json:"-"`
-	Limitations   []string       `json:"-"`
+	// Candidate/TestBasis (the resolved rule and test) and the diagnostics
+	// (Steps/ProseSummary/Limitations) are part of the canonical result stored in
+	// Databricks (so a consumer can resolve the rule/test via result_ref), but are
+	// stripped from the API result response — see apiResultKeysToHide.
+	Candidate     *CandidateSpec `json:"candidate,omitempty"`
+	TestBasis     *TestBasisSpec `json:"test_basis,omitempty"`
+	Steps         []string       `json:"steps"`
+	ProseSummary  string         `json:"prose_summary"`
+	Limitations   []string       `json:"limitations,omitempty"`
 	ContentSHA256 string         `json:"content_sha256,omitempty"`
 	SizeBytes     int64          `json:"size_bytes,omitempty"`
 	CreatedAt     time.Time      `json:"created_at"`
