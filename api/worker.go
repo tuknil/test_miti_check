@@ -32,7 +32,7 @@ type RunWorker struct {
 
 func NewRunWorker(store *RunStore, execute DurableExecutor, publisher ResultPublisher) *RunWorker {
 	return &RunWorker{store: store, execute: execute, publisher: publisher,
-		workerID: "mc-worker-" + hostname() + "-" + newID(), lease: 30 * time.Second, poll: 500 * time.Millisecond, maxAttempts: 3,
+		workerID: "mc-worker-" + hostname() + "-" + newID(), lease: 2 * time.Minute, poll: 500 * time.Millisecond, maxAttempts: 3,
 		maxVerificationAttempts: 6, verificationBackoff: 5 * time.Second}
 }
 
@@ -73,8 +73,14 @@ func (w *RunWorker) executeOne(parent context.Context, run DurableRun) {
 	}()
 	var leaseLost atomic.Bool
 	var cancellationRequested atomic.Bool
+	var lastHeartbeat atomic.Int64
+	lastHeartbeat.Store(time.Now().UnixNano())
 	go func() {
-		ticker := time.NewTicker(w.lease / 3)
+		heartbeatInterval := w.lease / 3
+		if heartbeatInterval > 10*time.Second {
+			heartbeatInterval = 10 * time.Second
+		}
+		ticker := time.NewTicker(heartbeatInterval)
 		defer ticker.Stop()
 		defer close(done)
 		for {
@@ -84,10 +90,13 @@ func (w *RunWorker) executeOne(parent context.Context, run DurableRun) {
 			case <-ticker.C:
 				requested, owned, err := w.store.Heartbeat(parent, run.RunID, w.workerID, run.LeaseToken, w.lease)
 				if err != nil {
-					leaseLost.Store(true)
 					logLifecycle("lease_heartbeat_failed", run, map[string]any{"error": err.Error()})
-					cancelExecution()
-					return
+					if time.Since(time.Unix(0, lastHeartbeat.Load())) >= w.lease {
+						leaseLost.Store(true)
+						cancelExecution()
+						return
+					}
+					continue
 				}
 				if !owned {
 					leaseLost.Store(true)
@@ -95,6 +104,7 @@ func (w *RunWorker) executeOne(parent context.Context, run DurableRun) {
 					cancelExecution()
 					return
 				}
+				lastHeartbeat.Store(time.Now().UnixNano())
 				if requested {
 					cancellationRequested.Store(true)
 					cancelExecution()
