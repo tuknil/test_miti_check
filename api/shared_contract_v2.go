@@ -570,20 +570,20 @@ func validateSharedCompleteness(cg map[string]any, semantics sharedSemantics) er
 			return errors.New("incomplete unsupported dimension")
 		}
 		for _, ref := range dimension.SourceMemberRefs {
-			if ref.Kind != "source-member" || ref.Scope != semantics.SemanticsID || members[ref.ID].MemberID == "" || unsupported[ref.ID] {
-				return errors.New("invalid or duplicate unsupported source member")
+			if ref.Kind != "source-member" || ref.Scope != semantics.SemanticsID || members[ref.ID].MemberID == "" {
+				return errors.New("invalid unsupported source member")
 			}
 			unsupported[ref.ID] = true
 		}
 		for _, ref := range dimension.SourceArtifactRefs {
-			if ref.Kind != "source-artifact" || ref.Scope != semantics.SemanticsID || artifacts[ref.ID].ArtifactID == "" || unsupportedArtifacts[ref.ID] {
-				return errors.New("invalid or duplicate unsupported source artifact")
+			if ref.Kind != "source-artifact" || ref.Scope != semantics.SemanticsID || artifacts[ref.ID].ArtifactID == "" {
+				return errors.New("invalid unsupported source artifact")
 			}
 			unsupportedArtifacts[ref.ID] = true
 		}
 		for _, ref := range dimension.SourceInputRefs {
-			if ref.Kind != "test-input" || ref.Scope != semantics.SemanticsID || outerInputs[ref.ID] == nil || unsupportedInputs[ref.ID] {
-				return errors.New("invalid or duplicate unsupported source input")
+			if ref.Kind != "test-input" || ref.Scope != semantics.SemanticsID || outerInputs[ref.ID] == nil {
+				return errors.New("invalid unsupported source input")
 			}
 			unsupportedInputs[ref.ID] = true
 		}
