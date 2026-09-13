@@ -1,0 +1,93 @@
+{
+  "capability": "mitigation-check",
+  "result_id": "mitigation-check-result:illustrative-42-r2",
+  "profile_id": "waf-standard@1",
+  "source_results": {
+    "attack_match_semantics": "check-generation-complete-result.json",
+    "candidate_bundle": "../examples/waf-atomic-v2.candidate-bundle.json"
+  },
+  "obligation_results": [
+    {
+      "obligation_id": "obligation-root",
+      "case_results": [
+        {
+          "input_id": "input-query",
+          "disposition": "blocked"
+        },
+        {
+          "input_id": "input-header",
+          "disposition": "blocked"
+        },
+        {
+          "input_id": "input-cookie",
+          "disposition": "blocked"
+        }
+      ]
+    },
+    {
+      "obligation_id": "obligation-url",
+      "case_results": [
+        {
+          "input_id": "input-query",
+          "disposition": "blocked"
+        }
+      ]
+    },
+    {
+      "obligation_id": "obligation-carriers",
+      "case_results": [
+        {
+          "input_id": "input-query",
+          "disposition": "blocked"
+        },
+        {
+          "input_id": "input-header",
+          "disposition": "blocked"
+        },
+        {
+          "input_id": "input-cookie",
+          "disposition": "blocked"
+        }
+      ]
+    },
+    {
+      "obligation_id": "obligation-query",
+      "case_results": [
+        {
+          "input_id": "input-query",
+          "disposition": "blocked"
+        }
+      ]
+    },
+    {
+      "obligation_id": "obligation-header",
+      "case_results": [
+        {
+          "input_id": "input-header",
+          "disposition": "blocked"
+        }
+      ]
+    },
+    {
+      "obligation_id": "obligation-cookie",
+      "case_results": [
+        {
+          "input_id": "input-cookie",
+          "disposition": "blocked"
+        }
+      ]
+    }
+  ],
+  "accounting": {
+    "required_obligation_count": 6,
+    "accounted_obligation_count": 6,
+    "unaccounted_required_obligation_count": 0,
+    "source_member_count": 9,
+    "represented_source_member_count": 6,
+    "unsupported_source_member_count": 3,
+    "unaccounted_source_member_count": 0,
+    "required_work_item_count": 10,
+    "disposed_work_item_count": 10,
+    "unaccounted_required_work_item_count": 0
+  }
+}

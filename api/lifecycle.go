@@ -321,6 +321,9 @@ func executeDurableRun(ctx context.Context, run DurableRun) (RunOutcome, error) 
 }
 
 func executeRequestedScenario(ctx context.Context, req SubmitMitigationCheckRequest, runID, resultID string) RunOutcome {
+	if v2LocatorMode(req) {
+		return executeSharedContractV2(ctx, req, runID, resultID)
+	}
 	if locatorMode(req) {
 		return executeScenarioByLocator(ctx, req, runID, resultID)
 	}

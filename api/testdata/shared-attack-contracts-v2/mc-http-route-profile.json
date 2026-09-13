@@ -1,0 +1,13 @@
+{
+  "illustrative": true,
+  "profile_id": "waf-standard@1",
+  "resolver_id": "mc-approved-route-adapter",
+  "registry_id": "janus-approved-test-routes",
+  "routes": {
+    "inventory-item-detail": {
+      "scheme": "https",
+      "authority": "approved-mc-target.internal",
+      "path": "/inventory/items/42"
+    }
+  }
+}

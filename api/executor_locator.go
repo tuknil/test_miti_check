@@ -55,7 +55,7 @@ type LocatorProvenance struct {
 	RoutePolicy         string                 `json:"route_policy"`
 	DefenseResult       ImmutableResultLocator `json:"defense_result"`
 	CheckResult         ImmutableResultLocator `json:"check_result"`
-	SelectedTestBasisID string                 `json:"selected_test_basis_id"`
+	SelectedTestBasisID string                 `json:"selected_test_basis_id,omitempty"`
 	Verification        string                 `json:"verification"`
 }
 
@@ -106,6 +106,9 @@ func validateLocatorRequest(req SubmitMitigationCheckRequest) []string {
 	}
 	if req.CheckProfileID != "" {
 		bad = append(bad, "check_profile_id")
+	}
+	if req.ProfileID != "" {
+		bad = append(bad, "profile_id")
 	}
 	if req.SubstrateSelector != "" {
 		bad = append(bad, "substrate_selector")
@@ -397,26 +400,28 @@ type defenseUpstreamResultRef struct {
 	CreatedAt     string           `json:"created_at,omitempty"`
 }
 type defenseCanonicalResult struct {
-	Capability         string                     `json:"capability"`
-	ContractID         string                     `json:"contract_id"`
-	RequestID          string                     `json:"request_id"`
-	CorrelationID      string                     `json:"correlation_id"`
-	RunID              string                     `json:"run_id"`
-	ResultID           string                     `json:"result_id"`
-	Status             string                     `json:"status"`
-	TerminalState      string                     `json:"terminal_state"`
-	ResultRef          *defenseResultRef          `json:"result_ref,omitempty"`
-	EvidenceRefs       []string                   `json:"evidence_refs"`
-	OutcomeReason      defenseOutcomeReason       `json:"outcome_reason"`
-	PrimaryCandidate   *defenseCandidate          `json:"primary_candidate,omitempty"`
-	ProofHandoffs      []defenseProofHandoff      `json:"proof_handoffs,omitempty"`
-	AttemptHistory     []defenseAttemptRecord     `json:"attempt_history"`
-	ProseSummary       string                     `json:"prose_summary"`
-	RequestDigest      string                     `json:"request_digest"`
-	UpstreamResultRefs []defenseUpstreamResultRef `json:"upstream_result_refs"`
-	ContentSHA256      string                     `json:"content_sha256,omitempty"`
-	SizeBytes          int64                      `json:"size_bytes,omitempty"`
-	CreatedAt          string                     `json:"created_at"`
+	Capability                string                     `json:"capability"`
+	ContractID                string                     `json:"contract_id"`
+	RequestID                 string                     `json:"request_id"`
+	CorrelationID             string                     `json:"correlation_id"`
+	RunID                     string                     `json:"run_id"`
+	ResultID                  string                     `json:"result_id"`
+	Status                    string                     `json:"status"`
+	TerminalState             string                     `json:"terminal_state"`
+	ResultRef                 *defenseResultRef          `json:"result_ref,omitempty"`
+	EvidenceRefs              []string                   `json:"evidence_refs"`
+	OutcomeReason             defenseOutcomeReason       `json:"outcome_reason"`
+	PrimaryCandidate          *defenseCandidate          `json:"primary_candidate,omitempty"`
+	CandidateBundle           json.RawMessage            `json:"candidate_bundle,omitempty"`
+	CandidateArtifactContents map[string]json.RawMessage `json:"candidate_artifact_contents,omitempty"`
+	ProofHandoffs             []defenseProofHandoff      `json:"proof_handoffs,omitempty"`
+	AttemptHistory            []defenseAttemptRecord     `json:"attempt_history"`
+	ProseSummary              string                     `json:"prose_summary"`
+	RequestDigest             string                     `json:"request_digest"`
+	UpstreamResultRefs        []defenseUpstreamResultRef `json:"upstream_result_refs"`
+	ContentSHA256             string                     `json:"content_sha256,omitempty"`
+	SizeBytes                 int64                      `json:"size_bytes,omitempty"`
+	CreatedAt                 string                     `json:"created_at"`
 }
 
 func verifyDefenseRow(row defenseRow, locator ImmutableResultLocator) (CandidateSpec, []string, error) {

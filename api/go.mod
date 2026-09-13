@@ -2,6 +2,8 @@ module github.com/janus/mitigation-check-api
 
 go 1.26.5
 
+replace github.com/santhosh-tekuri/jsonschema/v6 => ./third_party/jsonschema
+
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.23.0
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.14.0
@@ -9,6 +11,7 @@ require (
 	github.com/databricks/databricks-sql-go v1.14.0
 	github.com/google/go-containerregistry v0.21.9
 	github.com/jackc/pgx/v5 v5.10.0
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	golang.org/x/crypto v0.54.0
 )
 

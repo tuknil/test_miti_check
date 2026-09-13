@@ -65,6 +65,9 @@ type SubmitMitigationCheckRequest struct {
 	RoutePolicy   string                  `json:"route_policy,omitempty"`
 	DefenseResult *ImmutableResultLocator `json:"defense_result,omitempty"`
 	CheckResult   *ImmutableResultLocator `json:"check_result,omitempty"`
+	// ProfileID selects an immutable route-adapter profile for the additive
+	// shared-contract v2 path. Hydrated CG/DG bodies never enter the request.
+	ProfileID string `json:"profile_id,omitempty"`
 
 	// --- Upstream defense-generation payload (new input contract) ---
 	// The mitigation rule is taken from primary_candidate.artifact_content. The
@@ -484,6 +487,9 @@ func validate(req SubmitMitigationCheckRequest) []string {
 	// the legacy reference ids are not required and the upstream contract is accepted.
 	if req.ContractID != contractID {
 		bad = append(bad, "contract_id")
+	}
+	if v2LocatorMode(req) {
+		return append(bad, validateV2LocatorRequest(req)...)
 	}
 	if locatorMode(req) {
 		return append(bad, validateLocatorRequest(req)...)

@@ -1,0 +1,57 @@
+{
+  "rule_set_id": "janus-42-main",
+  "action": "block",
+  "fast_loop_negative_materials": [
+    {
+      "uri": "benign-request.http",
+      "digest": "sha256:8fa56e95dbbf26ffe226616325a94626ee6f8188906c4103d375e3525126eeaa",
+      "media_type": "message/http",
+      "byte_length": 129,
+      "immutable": true
+    }
+  ],
+  "rules": [
+    {
+      "rule_id": "query-target",
+      "component_id": "component-url",
+      "carrier": "query",
+      "name": "target",
+      "pattern": "^https://app\\.example\\.test/api/v1/items/[0-9]+$",
+      "flags": [],
+      "transformations": []
+    },
+    {
+      "rule_id": "query-filter",
+      "component_id": "component-query",
+      "carrier": "query",
+      "name": "filter",
+      "pattern": "^%2527OR%25201%253D1$",
+      "flags": [
+        "i"
+      ],
+      "transformations": []
+    },
+    {
+      "rule_id": "header-probe",
+      "component_id": "component-header",
+      "carrier": "header",
+      "name": "x-probe",
+      "pattern": "^%2527OR%25201%253D1$",
+      "flags": [
+        "i"
+      ],
+      "transformations": []
+    },
+    {
+      "rule_id": "cookie-probe",
+      "component_id": "component-cookie",
+      "carrier": "cookie",
+      "name": "probe",
+      "pattern": "^%2527OR%25201%253D1$",
+      "flags": [
+        "i"
+      ],
+      "transformations": []
+    }
+  ]
+}

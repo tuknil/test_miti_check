@@ -1,0 +1,23 @@
+{
+  "manifest_version": 1,
+  "source_repository": "apm0047460-Janus-Arch",
+  "source_commit": "dd8c15021883",
+  "source_path": "Architecture/Planning/shared-attack-contracts-phase-1/contracts",
+  "producer_commits": {
+    "check_generation": "a4e9cc2",
+    "defense_generation": "703bc03"
+  },
+  "files": {
+    "check-generation-complete-result.json": {"sha256": "sha256:26e9bf585d55c77b53b2846a0d7246f7dda17297756c9ccfb75a0572792a71dc", "byte_length": 41368},
+    "destination-free-http-request-template.json": {"sha256": "sha256:b5a9b994c47cc8d9924a5d6fad996a121b9a828be399ed71b3c01a8ebe9c2481", "byte_length": 628},
+    "http-template-route-resolution.json": {"sha256": "sha256:61b6f6979aca5fe79da45d738b9958a45e11673f2318ea983bfa87ab5dc1849d", "byte_length": 3607},
+    "mc-http-route-profile.json": {"sha256": "sha256:2239b244be7bb6a2ca9defd6a65fb22175d4d5423172ac6bda8b0a89137dd602", "byte_length": 321},
+    "mitigation-check-accounting.json": {"sha256": "sha256:d4131ad45568e32d16177a70c176fe28b2e750d4c85fc0a2e8059c822f78820d", "byte_length": 2214},
+    "waf-atomic-v2.candidate-bundle.json": {"sha256": "sha256:98a3c7868957ac0cd4483e685c4a532e1c833dd61e6eb54512cdded1a1f1a9d5", "byte_length": 11531},
+    "waf-rule-carriers.json": {"sha256": "sha256:4ceb2071f42b5b7bc4cf449b5929055c9d73b12d9fbda792e9a22a8b9d5c7e64", "byte_length": 577},
+    "waf-rule-main.json": {"sha256": "sha256:c5278463d9da91304ed51df14bee187662e725b47d4f29a4a9162ddb510e6453", "byte_length": 1333}
+  },
+  "models": false,
+  "network": false,
+  "databricks": false
+}

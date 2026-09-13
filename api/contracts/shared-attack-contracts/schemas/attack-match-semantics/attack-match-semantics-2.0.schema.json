@@ -1,0 +1,663 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.janus.internal/contracts/attack-match-semantics/attack-match-semantics-2.0.schema.json",
+  "title": "Attack match semantics 2.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_id",
+    "semantics_id",
+    "semantics_revision",
+    "semantics_digest",
+    "digest_profile",
+    "produced_at",
+    "source_binding",
+    "test_inputs",
+    "components",
+    "coverage",
+    "obligations",
+    "carrier_equivalence",
+    "limitations",
+    "unsupported_dimensions",
+    "evidence"
+  ],
+  "properties": {
+    "contract_id": {
+      "const": "attack-match-semantics@2.0"
+    },
+    "semantics_id": {
+      "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/StableId"
+    },
+    "semantics_revision": {
+      "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/Revision"
+    },
+    "semantics_digest": {
+      "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/Digest"
+    },
+    "digest_profile": {
+      "const": "rfc8785-sha256-exclude-semantics_digest-v1"
+    },
+    "produced_at": {
+      "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/Timestamp"
+    },
+    "source_binding": {
+      "description": "Complete CG source projection binding. The enclosing final result digest and locator are intentionally not embedded here.",
+      "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/SourceBinding"
+    },
+    "test_inputs": {
+      "description": "CG-owned executable shapes for successfully retained artifacts represented in this execution slice. Unsupported and nonpositive source members remain in source_binding and unsupported_dimensions but do not receive invented test inputs. HTTP entries may be destination-free http-request-template values or fully rendered http-request values. Consumer route adapters resolve templates under approved profiles or registries before execution.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "items": {
+        "$ref": "#/$defs/TestInput"
+      }
+    },
+    "components": {
+      "description": "Attack components for successfully retained represented artifacts only. Absence from this array never means an unsupported or nonpositive source member was covered.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "items": {
+        "$ref": "#/$defs/Component"
+      }
+    },
+    "coverage": {
+      "$ref": "#/$defs/CoverageGraph"
+    },
+    "obligations": {
+      "description": "Requirements derived only from successfully retained represented artifacts. Unsupported and nonpositive source members do not receive obligations and are accounted through source_binding and unsupported_dimensions.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 512,
+      "items": {
+        "$ref": "#/$defs/Obligation"
+      }
+    },
+    "carrier_equivalence": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "$ref": "#/$defs/CarrierEquivalence"
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "unsupported_dimensions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "dimension",
+          "reason",
+          "source_member_refs",
+          "source_artifact_refs",
+          "source_input_refs"
+        ],
+        "properties": {
+          "dimension": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "source_member_refs": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/TypedRef"
+            }
+          },
+          "source_artifact_refs": {
+            "type": "array",
+            "items": {
+              "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/TypedRef"
+            }
+          },
+          "source_input_refs": {
+            "type": "array",
+            "items": {
+              "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/TypedRef"
+            }
+          }
+        }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/Evidence"
+      }
+    }
+  },
+  "$defs": {
+    "TestInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "input_id",
+        "source_member_refs",
+        "source_artifact_ref",
+        "input",
+        "rendering_provenance"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "input": {
+                "properties": {
+                  "modality": {
+                    "const": "http-request-template"
+                  }
+                },
+                "required": [
+                  "modality"
+                ]
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "rendered_material"
+              ]
+            }
+          },
+          "else": {
+            "required": [
+              "rendered_material"
+            ]
+          }
+        }
+      ],
+      "properties": {
+        "input_id": {
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/StableId"
+        },
+        "source_member_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/TypedRef"
+          }
+        },
+        "source_artifact_ref": {
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/TypedRef"
+        },
+        "input": {
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/TestInput"
+        },
+        "rendered_material": {
+          "description": "Exact immutable execution material. It is forbidden for destination-free HTTP templates because MC or BV resolves and records the rendered request.",
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/ImmutableLocator"
+        },
+        "rendering_provenance": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/Transformation"
+          }
+        }
+      }
+    },
+    "Obligation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "obligation_id",
+        "coverage_ref",
+        "required_input_refs",
+        "required"
+      ],
+      "properties": {
+        "obligation_id": {
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/StableId"
+        },
+        "coverage_ref": {
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/TypedRef"
+        },
+        "required_input_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/TypedRef"
+          }
+        },
+        "required": {
+          "const": true
+        }
+      }
+    },
+    "Component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "component_id",
+        "description",
+        "source_member_refs",
+        "input_refs",
+        "location",
+        "grammar",
+        "matcher",
+        "transformations",
+        "exact_fallback",
+        "validation_only_samples",
+        "evidence_refs",
+        "limitations"
+      ],
+      "properties": {
+        "component_id": {
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/StableId"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_member_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/TypedRef"
+          }
+        },
+        "input_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/TypedRef"
+          }
+        },
+        "location": {
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/Location"
+        },
+        "grammar": {
+          "$ref": "#/$defs/Grammar"
+        },
+        "matcher": {
+          "$ref": "#/$defs/Matcher"
+        },
+        "transformations": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/Transformation"
+          }
+        },
+        "exact_fallback": {
+          "$ref": "#/$defs/ExactFallback"
+        },
+        "validation_only_samples": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ValidationSample"
+          }
+        },
+        "evidence_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/TypedRef"
+          }
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "Grammar": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "segments",
+        "slots"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "scalar",
+            "structured-template"
+          ]
+        },
+        "segments": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "value"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "literal"
+                  },
+                  "value": {
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "slot_ref"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "slot"
+                  },
+                  "slot_ref": {
+                    "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/TypedRef"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "slots": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Slot"
+          }
+        }
+      }
+    },
+    "Slot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slot_id",
+        "value_type",
+        "sample",
+        "grounding",
+        "allowed_domain",
+        "evidence_refs",
+        "validation_only"
+      ],
+      "properties": {
+        "slot_id": {
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/StableId"
+        },
+        "value_type": {
+          "enum": [
+            "string",
+            "bytes",
+            "integer",
+            "ip-address",
+            "port",
+            "scheme",
+            "authority",
+            "path",
+            "event-attribute"
+          ]
+        },
+        "sample": {
+          "type": [
+            "string",
+            "integer"
+          ]
+        },
+        "grounding": {
+          "enum": [
+            "source-member",
+            "rendered-input",
+            "evidence",
+            "profile-validation"
+          ]
+        },
+        "allowed_domain": {
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "enum",
+                "regex",
+                "integer-range"
+              ]
+            }
+          },
+          "additionalProperties": true
+        },
+        "evidence_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/TypedRef"
+          }
+        },
+        "validation_only": {
+          "type": "boolean"
+        }
+      }
+    },
+    "Matcher": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "value",
+            "case_sensitive"
+          ],
+          "properties": {
+            "kind": {
+              "const": "exact-string"
+            },
+            "value": {
+              "type": "string"
+            },
+            "case_sensitive": {
+              "type": "boolean"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "pattern",
+            "flags"
+          ],
+          "properties": {
+            "kind": {
+              "const": "regex"
+            },
+            "pattern": {
+              "type": "string"
+            },
+            "flags": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "i",
+                  "m",
+                  "s",
+                  "u"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ExactFallback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "behavior",
+        "value_base64",
+        "digest"
+      ],
+      "properties": {
+        "behavior": {
+          "enum": [
+            "exact-bytes",
+            "exact-utf8"
+          ]
+        },
+        "value_base64": {
+          "type": "string",
+          "contentEncoding": "base64"
+        },
+        "digest": {
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/Digest"
+        }
+      }
+    },
+    "ValidationSample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sample_id",
+        "value_base64",
+        "expected_match",
+        "validation_only",
+        "source"
+      ],
+      "properties": {
+        "sample_id": {
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/StableId"
+        },
+        "value_base64": {
+          "type": "string"
+        },
+        "expected_match": {
+          "type": "boolean"
+        },
+        "validation_only": {
+          "const": true
+        },
+        "source": {
+          "enum": [
+            "profile",
+            "evidence",
+            "derived"
+          ]
+        }
+      }
+    },
+    "CoverageGraph": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "root_group_ref",
+        "groups"
+      ],
+      "properties": {
+        "root_group_ref": {
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/TypedRef"
+        },
+        "groups": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/CoverageGroup"
+          }
+        }
+      }
+    },
+    "CoverageGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "group_id",
+        "operator",
+        "minimum_matches",
+        "member_refs",
+        "source_member_refs"
+      ],
+      "properties": {
+        "group_id": {
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/StableId"
+        },
+        "operator": {
+          "enum": [
+            "all",
+            "any",
+            "at-least"
+          ]
+        },
+        "minimum_matches": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "member_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/TypedRef"
+          }
+        },
+        "source_member_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/TypedRef"
+          }
+        }
+      }
+    },
+    "CarrierEquivalence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "equivalence_id",
+        "source_component_ref",
+        "source_input_ref",
+        "destination_component_ref",
+        "destination_input_ref",
+        "relationship",
+        "evidence_refs"
+      ],
+      "properties": {
+        "equivalence_id": {
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/StableId"
+        },
+        "source_component_ref": {
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/TypedRef"
+        },
+        "source_input_ref": {
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/TypedRef"
+        },
+        "destination_component_ref": {
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/TypedRef"
+        },
+        "destination_input_ref": {
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/TypedRef"
+        },
+        "relationship": {
+          "enum": [
+            "equivalent",
+            "target-normalizes-to-same-value",
+            "alternate-supported-carrier"
+          ]
+        },
+        "evidence_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/TypedRef"
+          }
+        }
+      }
+    }
+  }
+}

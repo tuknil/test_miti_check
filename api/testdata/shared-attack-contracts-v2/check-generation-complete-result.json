@@ -1,0 +1,1416 @@
+{
+  "contract_id": "check-generation@2.1",
+  "result_id": "check-generation-run-result:CVE-2026-0042:7",
+  "revision": 3,
+  "run_id": "check-generation-run:CVE-2026-0042:7",
+  "request_id": "check-generation-request:CVE-2026-0042:7",
+  "produced_at": "2026-09-11T12:00:00Z",
+  "run_status": "completed",
+  "input_membership": {
+    "signal_ids": [
+      "signal-url-shape",
+      "signal-authority",
+      "signal-resource",
+      "signal-encoded-probe",
+      "signal-header-carrier",
+      "signal-cookie-carrier",
+      "signal-network-probe",
+      "signal-endpoint-probe",
+      "signal-out-of-scope"
+    ],
+    "affected_artifact_ids": [
+      "affected-tech:gateway:4.x"
+    ],
+    "members": [
+      {
+        "member_id": "member-protocol",
+        "signal_id": "signal-url-shape",
+        "affected_artifact_id": "affected-tech:gateway:4.x"
+      },
+      {
+        "member_id": "member-authority",
+        "signal_id": "signal-authority",
+        "affected_artifact_id": "affected-tech:gateway:4.x"
+      },
+      {
+        "member_id": "member-resource",
+        "signal_id": "signal-resource",
+        "affected_artifact_id": "affected-tech:gateway:4.x"
+      },
+      {
+        "member_id": "member-query",
+        "signal_id": "signal-encoded-probe",
+        "affected_artifact_id": "affected-tech:gateway:4.x"
+      },
+      {
+        "member_id": "member-header",
+        "signal_id": "signal-header-carrier",
+        "affected_artifact_id": "affected-tech:gateway:4.x"
+      },
+      {
+        "member_id": "member-cookie",
+        "signal_id": "signal-cookie-carrier",
+        "affected_artifact_id": "affected-tech:gateway:4.x"
+      },
+      {
+        "member_id": "member-network",
+        "signal_id": "signal-network-probe",
+        "affected_artifact_id": "affected-tech:gateway:4.x"
+      },
+      {
+        "member_id": "member-endpoint",
+        "signal_id": "signal-endpoint-probe",
+        "affected_artifact_id": "affected-tech:gateway:4.x"
+      },
+      {
+        "member_id": "member-scope-declined",
+        "signal_id": "signal-out-of-scope",
+        "affected_artifact_id": "affected-tech:gateway:4.x"
+      }
+    ]
+  },
+  "member_results": [
+    {
+      "member_id": "member-protocol",
+      "signal_id": "signal-url-shape",
+      "affected_artifact_id": "affected-tech:gateway:4.x",
+      "terminal_state": "verified",
+      "artifact_refs": [
+        "cg-artifact-query"
+      ]
+    },
+    {
+      "member_id": "member-authority",
+      "signal_id": "signal-authority",
+      "affected_artifact_id": "affected-tech:gateway:4.x",
+      "terminal_state": "verified",
+      "artifact_refs": [
+        "cg-artifact-query"
+      ]
+    },
+    {
+      "member_id": "member-resource",
+      "signal_id": "signal-resource",
+      "affected_artifact_id": "affected-tech:gateway:4.x",
+      "terminal_state": "verified",
+      "artifact_refs": [
+        "cg-artifact-query"
+      ]
+    },
+    {
+      "member_id": "member-query",
+      "signal_id": "signal-encoded-probe",
+      "affected_artifact_id": "affected-tech:gateway:4.x",
+      "terminal_state": "verified",
+      "artifact_refs": [
+        "cg-artifact-query"
+      ]
+    },
+    {
+      "member_id": "member-header",
+      "signal_id": "signal-header-carrier",
+      "affected_artifact_id": "affected-tech:gateway:4.x",
+      "terminal_state": "signal-produced",
+      "artifact_refs": [
+        "cg-artifact-header"
+      ]
+    },
+    {
+      "member_id": "member-cookie",
+      "signal_id": "signal-cookie-carrier",
+      "affected_artifact_id": "affected-tech:gateway:4.x",
+      "terminal_state": "signal-produced",
+      "artifact_refs": [
+        "cg-artifact-cookie"
+      ]
+    },
+    {
+      "member_id": "member-network",
+      "signal_id": "signal-network-probe",
+      "affected_artifact_id": "affected-tech:gateway:4.x",
+      "terminal_state": "could-not-verify",
+      "artifact_refs": []
+    },
+    {
+      "member_id": "member-endpoint",
+      "signal_id": "signal-endpoint-probe",
+      "affected_artifact_id": "affected-tech:gateway:4.x",
+      "terminal_state": "no-checkable-signal",
+      "artifact_refs": []
+    },
+    {
+      "member_id": "member-scope-declined",
+      "signal_id": "signal-out-of-scope",
+      "affected_artifact_id": "affected-tech:gateway:4.x",
+      "terminal_state": "scope-declined",
+      "artifact_refs": []
+    }
+  ],
+  "artifacts": [
+    {
+      "artifact_id": "cg-artifact-query",
+      "artifact_kind": "proof-of-vuln-check",
+      "member_ids": [
+        "member-protocol",
+        "member-authority",
+        "member-resource",
+        "member-query"
+      ],
+      "signal_ids": [
+        "signal-url-shape",
+        "signal-authority",
+        "signal-resource",
+        "signal-encoded-probe"
+      ],
+      "affected_artifact_ids": [
+        "affected-tech:gateway:4.x"
+      ],
+      "content_ref": "fixtures/composite-request.http",
+      "content_hash": "sha256:d14a6a2cf6337786b97f70d9e3251df9ccabd8df1c7f4c42fa5e17984823c892",
+      "attack_match_semantics_ref": {
+        "semantics_id": "ams-composite-42",
+        "component_ids": [
+          "component-url",
+          "component-query"
+        ],
+        "obligation_ids": [
+          "obligation-root",
+          "obligation-url",
+          "obligation-query"
+        ]
+      }
+    },
+    {
+      "artifact_id": "cg-artifact-header",
+      "artifact_kind": "mitigation-checkable-signal",
+      "member_ids": [
+        "member-header"
+      ],
+      "signal_ids": [
+        "signal-header-carrier"
+      ],
+      "affected_artifact_ids": [
+        "affected-tech:gateway:4.x"
+      ],
+      "content_ref": "fixtures/alternate-header.http",
+      "content_hash": "sha256:298753e99eacfa62e1e77a7ab157fff1fba428237328983f468485cf78a667cd",
+      "attack_match_semantics_ref": {
+        "semantics_id": "ams-composite-42",
+        "component_ids": [
+          "component-header"
+        ],
+        "obligation_ids": [
+          "obligation-root",
+          "obligation-carriers",
+          "obligation-header"
+        ]
+      }
+    },
+    {
+      "artifact_id": "cg-artifact-cookie",
+      "artifact_kind": "mitigation-checkable-signal",
+      "member_ids": [
+        "member-cookie"
+      ],
+      "signal_ids": [
+        "signal-cookie-carrier"
+      ],
+      "affected_artifact_ids": [
+        "affected-tech:gateway:4.x"
+      ],
+      "content_ref": "fixtures/alternate-cookie.http",
+      "content_hash": "sha256:81a2f34436a40895caa86dac100a95f2bf9dd3da5527b02ef7317ebfa233c3af",
+      "attack_match_semantics_ref": {
+        "semantics_id": "ams-composite-42",
+        "component_ids": [
+          "component-cookie"
+        ],
+        "obligation_ids": [
+          "obligation-root",
+          "obligation-carriers",
+          "obligation-cookie"
+        ]
+      }
+    }
+  ],
+  "test_inputs": [
+    {
+      "input_id": "input-query",
+      "artifact_id": "cg-artifact-query",
+      "member_ids": [
+        "member-protocol",
+        "member-authority",
+        "member-resource",
+        "member-query"
+      ]
+    },
+    {
+      "input_id": "input-header",
+      "artifact_id": "cg-artifact-header",
+      "member_ids": [
+        "member-header"
+      ]
+    },
+    {
+      "input_id": "input-cookie",
+      "artifact_id": "cg-artifact-cookie",
+      "member_ids": [
+        "member-cookie"
+      ]
+    }
+  ],
+  "accounting": {
+    "input_member_count": 9,
+    "artifact_count": 3,
+    "unaccounted_member_count": 0
+  },
+  "prose_summary": "All nine source members and all three generated artifacts are present and accounted for. Six members are represented by retained artifacts; three nonpositive members have no generated artifact references and are explicitly unsupported in this execution slice.",
+  "attack_match_semantics": {
+    "contract_id": "attack-match-semantics@2.0",
+    "semantics_id": "ams-composite-42",
+    "semantics_revision": 1,
+    "semantics_digest": "sha256:25ceed207a3aaab07d98606635bf0cc42f815570c8b9b6709d6bd11f5c80fe06",
+    "digest_profile": "rfc8785-sha256-exclude-semantics_digest-v1",
+    "produced_at": "2026-09-11T12:00:00Z",
+    "source_binding": {
+      "check_generation": {
+        "contract_id": "check-generation@2.1",
+        "result_id": "check-generation-run-result:CVE-2026-0042:7",
+        "revision": 3,
+        "member_count": 9,
+        "artifact_count": 3,
+        "source_projection_digest": "sha256:b53a9855949961317bb2e707f10b5bd96af463244c979f4de3ff0573a69565b4",
+        "digest_profile": "rfc8785-sha256-cg-source-projection-v1"
+      },
+      "artifacts": [
+        {
+          "artifact_id": "cg-artifact-query",
+          "artifact_kind": "proof-of-vuln-check",
+          "signal_ids": [
+            "signal-url-shape",
+            "signal-authority",
+            "signal-resource",
+            "signal-encoded-probe"
+          ],
+          "affected_artifact_ids": [
+            "affected-tech:gateway:4.x"
+          ],
+          "content": {
+            "uri": "../fixtures/composite-request.http",
+            "digest": "sha256:d14a6a2cf6337786b97f70d9e3251df9ccabd8df1c7f4c42fa5e17984823c892",
+            "media_type": "message/http",
+            "byte_length": 142,
+            "immutable": true
+          },
+          "member_refs": [
+            {
+              "kind": "source-member",
+              "scope": "ams-composite-42",
+              "id": "member-protocol"
+            },
+            {
+              "kind": "source-member",
+              "scope": "ams-composite-42",
+              "id": "member-authority"
+            },
+            {
+              "kind": "source-member",
+              "scope": "ams-composite-42",
+              "id": "member-resource"
+            },
+            {
+              "kind": "source-member",
+              "scope": "ams-composite-42",
+              "id": "member-query"
+            }
+          ]
+        },
+        {
+          "artifact_id": "cg-artifact-header",
+          "artifact_kind": "mitigation-checkable-signal",
+          "signal_ids": [
+            "signal-header-carrier"
+          ],
+          "affected_artifact_ids": [
+            "affected-tech:gateway:4.x"
+          ],
+          "content": {
+            "uri": "../fixtures/alternate-header.http",
+            "digest": "sha256:298753e99eacfa62e1e77a7ab157fff1fba428237328983f468485cf78a667cd",
+            "media_type": "message/http",
+            "byte_length": 82,
+            "immutable": true
+          },
+          "member_refs": [
+            {
+              "kind": "source-member",
+              "scope": "ams-composite-42",
+              "id": "member-header"
+            }
+          ]
+        },
+        {
+          "artifact_id": "cg-artifact-cookie",
+          "artifact_kind": "mitigation-checkable-signal",
+          "signal_ids": [
+            "signal-cookie-carrier"
+          ],
+          "affected_artifact_ids": [
+            "affected-tech:gateway:4.x"
+          ],
+          "content": {
+            "uri": "../fixtures/alternate-cookie.http",
+            "digest": "sha256:81a2f34436a40895caa86dac100a95f2bf9dd3da5527b02ef7317ebfa233c3af",
+            "media_type": "message/http",
+            "byte_length": 105,
+            "immutable": true
+          },
+          "member_refs": [
+            {
+              "kind": "source-member",
+              "scope": "ams-composite-42",
+              "id": "member-cookie"
+            }
+          ]
+        }
+      ],
+      "members": [
+        {
+          "member_id": "member-protocol",
+          "signal_id": "signal-url-shape",
+          "affected_artifact_id": "affected-tech:gateway:4.x",
+          "terminal_state": "verified",
+          "artifact_refs": [
+            {
+              "kind": "source-artifact",
+              "scope": "ams-composite-42",
+              "id": "cg-artifact-query"
+            }
+          ]
+        },
+        {
+          "member_id": "member-authority",
+          "signal_id": "signal-authority",
+          "affected_artifact_id": "affected-tech:gateway:4.x",
+          "terminal_state": "verified",
+          "artifact_refs": [
+            {
+              "kind": "source-artifact",
+              "scope": "ams-composite-42",
+              "id": "cg-artifact-query"
+            }
+          ]
+        },
+        {
+          "member_id": "member-resource",
+          "signal_id": "signal-resource",
+          "affected_artifact_id": "affected-tech:gateway:4.x",
+          "terminal_state": "verified",
+          "artifact_refs": [
+            {
+              "kind": "source-artifact",
+              "scope": "ams-composite-42",
+              "id": "cg-artifact-query"
+            }
+          ]
+        },
+        {
+          "member_id": "member-query",
+          "signal_id": "signal-encoded-probe",
+          "affected_artifact_id": "affected-tech:gateway:4.x",
+          "terminal_state": "verified",
+          "artifact_refs": [
+            {
+              "kind": "source-artifact",
+              "scope": "ams-composite-42",
+              "id": "cg-artifact-query"
+            }
+          ]
+        },
+        {
+          "member_id": "member-header",
+          "signal_id": "signal-header-carrier",
+          "affected_artifact_id": "affected-tech:gateway:4.x",
+          "terminal_state": "signal-produced",
+          "artifact_refs": [
+            {
+              "kind": "source-artifact",
+              "scope": "ams-composite-42",
+              "id": "cg-artifact-header"
+            }
+          ]
+        },
+        {
+          "member_id": "member-cookie",
+          "signal_id": "signal-cookie-carrier",
+          "affected_artifact_id": "affected-tech:gateway:4.x",
+          "terminal_state": "signal-produced",
+          "artifact_refs": [
+            {
+              "kind": "source-artifact",
+              "scope": "ams-composite-42",
+              "id": "cg-artifact-cookie"
+            }
+          ]
+        },
+        {
+          "member_id": "member-network",
+          "signal_id": "signal-network-probe",
+          "affected_artifact_id": "affected-tech:gateway:4.x",
+          "terminal_state": "could-not-verify",
+          "artifact_refs": []
+        },
+        {
+          "member_id": "member-endpoint",
+          "signal_id": "signal-endpoint-probe",
+          "affected_artifact_id": "affected-tech:gateway:4.x",
+          "terminal_state": "no-checkable-signal",
+          "artifact_refs": []
+        },
+        {
+          "member_id": "member-scope-declined",
+          "signal_id": "signal-out-of-scope",
+          "affected_artifact_id": "affected-tech:gateway:4.x",
+          "terminal_state": "scope-declined",
+          "artifact_refs": []
+        }
+      ]
+    },
+    "test_inputs": [
+      {
+        "input_id": "input-query",
+        "source_member_refs": [
+          {
+            "kind": "source-member",
+            "scope": "ams-composite-42",
+            "id": "member-protocol"
+          },
+          {
+            "kind": "source-member",
+            "scope": "ams-composite-42",
+            "id": "member-authority"
+          },
+          {
+            "kind": "source-member",
+            "scope": "ams-composite-42",
+            "id": "member-resource"
+          },
+          {
+            "kind": "source-member",
+            "scope": "ams-composite-42",
+            "id": "member-query"
+          }
+        ],
+        "source_artifact_ref": {
+          "kind": "source-artifact",
+          "scope": "ams-composite-42",
+          "id": "cg-artifact-query"
+        },
+        "input": {
+          "modality": "http-request",
+          "method": "GET",
+          "scheme": "https",
+          "authority": "app.example.test",
+          "path": "/api/v1/items/42",
+          "query": [
+            {
+              "name": "target",
+              "value": "https://app.example.test/api/v1/items/42"
+            },
+            {
+              "name": "filter",
+              "value": "%2527OR%25201%253D1"
+            }
+          ],
+          "headers": [],
+          "cookies": [],
+          "body": {
+            "state": "absent"
+          }
+        },
+        "rendered_material": {
+          "uri": "../fixtures/composite-request.http",
+          "digest": "sha256:d14a6a2cf6337786b97f70d9e3251df9ccabd8df1c7f4c42fa5e17984823c892",
+          "media_type": "message/http",
+          "byte_length": 142,
+          "immutable": true
+        },
+        "rendering_provenance": []
+      },
+      {
+        "input_id": "input-header",
+        "source_member_refs": [
+          {
+            "kind": "source-member",
+            "scope": "ams-composite-42",
+            "id": "member-header"
+          }
+        ],
+        "source_artifact_ref": {
+          "kind": "source-artifact",
+          "scope": "ams-composite-42",
+          "id": "cg-artifact-header"
+        },
+        "input": {
+          "modality": "http-request",
+          "method": "GET",
+          "scheme": "https",
+          "authority": "app.example.test",
+          "path": "/api/v1/items/42",
+          "query": [],
+          "headers": [
+            {
+              "name": "X-Probe",
+              "value": "%2527OR%25201%253D1"
+            }
+          ],
+          "cookies": [],
+          "body": {
+            "state": "absent"
+          }
+        },
+        "rendered_material": {
+          "uri": "../fixtures/alternate-header.http",
+          "digest": "sha256:298753e99eacfa62e1e77a7ab157fff1fba428237328983f468485cf78a667cd",
+          "media_type": "message/http",
+          "byte_length": 82,
+          "immutable": true
+        },
+        "rendering_provenance": []
+      },
+      {
+        "input_id": "input-cookie",
+        "source_member_refs": [
+          {
+            "kind": "source-member",
+            "scope": "ams-composite-42",
+            "id": "member-cookie"
+          }
+        ],
+        "source_artifact_ref": {
+          "kind": "source-artifact",
+          "scope": "ams-composite-42",
+          "id": "cg-artifact-cookie"
+        },
+        "input": {
+          "modality": "http-request",
+          "method": "GET",
+          "scheme": "https",
+          "authority": "app.example.test",
+          "path": "/api/v1/items/42",
+          "query": [],
+          "headers": [],
+          "cookies": [
+            {
+              "name": "probe",
+              "value": "%2527OR%25201%253D1"
+            }
+          ],
+          "body": {
+            "state": "empty",
+            "content_base64": "",
+            "content_length": 0,
+            "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "rendered_material": {
+          "uri": "../fixtures/alternate-cookie.http",
+          "digest": "sha256:81a2f34436a40895caa86dac100a95f2bf9dd3da5527b02ef7317ebfa233c3af",
+          "media_type": "message/http",
+          "byte_length": 105,
+          "immutable": true
+        },
+        "rendering_provenance": []
+      }
+    ],
+    "components": [
+      {
+        "component_id": "component-url",
+        "description": "Protocol, authority, and resource slots inside the isolated target query value",
+        "source_member_refs": [
+          {
+            "kind": "source-member",
+            "scope": "ams-composite-42",
+            "id": "member-protocol"
+          },
+          {
+            "kind": "source-member",
+            "scope": "ams-composite-42",
+            "id": "member-authority"
+          },
+          {
+            "kind": "source-member",
+            "scope": "ams-composite-42",
+            "id": "member-resource"
+          }
+        ],
+        "input_refs": [
+          {
+            "kind": "test-input",
+            "scope": "ams-composite-42",
+            "id": "input-query"
+          }
+        ],
+        "location": {
+          "family": "http",
+          "kind": "http-query",
+          "name": "target",
+          "occurrence": 0
+        },
+        "grammar": {
+          "kind": "structured-template",
+          "segments": [
+            {
+              "kind": "slot",
+              "slot_ref": {
+                "kind": "slot",
+                "scope": "component-url",
+                "id": "slot-scheme"
+              }
+            },
+            {
+              "kind": "literal",
+              "value": "://"
+            },
+            {
+              "kind": "slot",
+              "slot_ref": {
+                "kind": "slot",
+                "scope": "component-url",
+                "id": "slot-authority"
+              }
+            },
+            {
+              "kind": "slot",
+              "slot_ref": {
+                "kind": "slot",
+                "scope": "component-url",
+                "id": "slot-resource"
+              }
+            }
+          ],
+          "slots": [
+            {
+              "slot_id": "slot-scheme",
+              "value_type": "scheme",
+              "sample": "https",
+              "grounding": "rendered-input",
+              "allowed_domain": {
+                "kind": "enum",
+                "values": [
+                  "https"
+                ]
+              },
+              "evidence_refs": [
+                {
+                  "kind": "evidence",
+                  "scope": "ams-composite-42",
+                  "id": "evidence-request"
+                }
+              ],
+              "validation_only": false
+            },
+            {
+              "slot_id": "slot-authority",
+              "value_type": "authority",
+              "sample": "app.example.test",
+              "grounding": "rendered-input",
+              "allowed_domain": {
+                "kind": "enum",
+                "values": [
+                  "app.example.test"
+                ]
+              },
+              "evidence_refs": [
+                {
+                  "kind": "evidence",
+                  "scope": "ams-composite-42",
+                  "id": "evidence-request"
+                }
+              ],
+              "validation_only": false
+            },
+            {
+              "slot_id": "slot-resource",
+              "value_type": "path",
+              "sample": "/api/v1/items/42",
+              "grounding": "source-member",
+              "allowed_domain": {
+                "kind": "regex",
+                "pattern": "^/api/v1/items/[0-9]+$"
+              },
+              "evidence_refs": [
+                {
+                  "kind": "evidence",
+                  "scope": "ams-composite-42",
+                  "id": "evidence-request"
+                }
+              ],
+              "validation_only": false
+            }
+          ]
+        },
+        "matcher": {
+          "kind": "regex",
+          "pattern": "^https://app\\.example\\.test/api/v1/items/[0-9]+$",
+          "flags": []
+        },
+        "transformations": [],
+        "exact_fallback": {
+          "behavior": "exact-utf8",
+          "value_base64": "aHR0cHM6Ly9hcHAuZXhhbXBsZS50ZXN0L2FwaS92MS9pdGVtcy80Mg==",
+          "digest": "sha256:54f9ced657aa295a315a1b98bca31d7886250c31cf2d0f44a490cc03771bc768"
+        },
+        "validation_only_samples": [],
+        "evidence_refs": [
+          {
+            "kind": "evidence",
+            "scope": "ams-composite-42",
+            "id": "evidence-request"
+          }
+        ],
+        "limitations": []
+      },
+      {
+        "component_id": "component-query",
+        "description": "Double-percent-encoded query discriminator",
+        "source_member_refs": [
+          {
+            "kind": "source-member",
+            "scope": "ams-composite-42",
+            "id": "member-query"
+          }
+        ],
+        "input_refs": [
+          {
+            "kind": "test-input",
+            "scope": "ams-composite-42",
+            "id": "input-query"
+          }
+        ],
+        "location": {
+          "family": "http",
+          "kind": "http-query",
+          "name": "filter",
+          "occurrence": 0
+        },
+        "grammar": {
+          "kind": "scalar",
+          "segments": [
+            {
+              "kind": "slot",
+              "slot_ref": {
+                "kind": "slot",
+                "scope": "component-query",
+                "id": "slot-probe"
+              }
+            }
+          ],
+          "slots": [
+            {
+              "slot_id": "slot-probe",
+              "value_type": "string",
+              "sample": "%2527OR%25201%253D1",
+              "grounding": "source-member",
+              "allowed_domain": {
+                "kind": "enum",
+                "values": [
+                  "%2527OR%25201%253D1"
+                ]
+              },
+              "evidence_refs": [
+                {
+                  "kind": "evidence",
+                  "scope": "ams-composite-42",
+                  "id": "evidence-request"
+                }
+              ],
+              "validation_only": false
+            }
+          ]
+        },
+        "matcher": {
+          "kind": "exact-string",
+          "value": "'OR 1=1",
+          "case_sensitive": true
+        },
+        "transformations": [
+          {
+            "step_id": "decode-1",
+            "order": 0,
+            "operation": "decode",
+            "direction": "forward",
+            "input_stage": "parsed-field",
+            "output_stage": "decoded-value",
+            "parameters": {
+              "codec": "percent",
+              "max_output_bytes": 128
+            },
+            "preconditions": [
+              "valid percent triplets"
+            ],
+            "evidence_refs": [
+              {
+                "kind": "evidence",
+                "scope": "ams-composite-42",
+                "id": "evidence-request"
+              }
+            ],
+            "failure": {
+              "code": "invalid-percent-encoding",
+              "behavior": "reject"
+            }
+          },
+          {
+            "step_id": "decode-2",
+            "order": 1,
+            "operation": "decode",
+            "direction": "forward",
+            "input_stage": "decoded-value",
+            "output_stage": "normalized-value",
+            "parameters": {
+              "codec": "percent",
+              "max_output_bytes": 128
+            },
+            "preconditions": [
+              "valid percent triplets after first decode"
+            ],
+            "evidence_refs": [
+              {
+                "kind": "evidence",
+                "scope": "ams-composite-42",
+                "id": "evidence-request"
+              }
+            ],
+            "failure": {
+              "code": "invalid-second-percent-encoding",
+              "behavior": "reject"
+            }
+          }
+        ],
+        "exact_fallback": {
+          "behavior": "exact-utf8",
+          "value_base64": "JTI1MjdPUiUyNTIwMSUyNTNEMQ==",
+          "digest": "sha256:2b7ac700f7fcba1683f8869587221517c822e8da1600c7711a46ce088a03135d"
+        },
+        "validation_only_samples": [],
+        "evidence_refs": [
+          {
+            "kind": "evidence",
+            "scope": "ams-composite-42",
+            "id": "evidence-request"
+          }
+        ],
+        "limitations": []
+      },
+      {
+        "component_id": "component-header",
+        "description": "Alternate header carrier",
+        "source_member_refs": [
+          {
+            "kind": "source-member",
+            "scope": "ams-composite-42",
+            "id": "member-header"
+          }
+        ],
+        "input_refs": [
+          {
+            "kind": "test-input",
+            "scope": "ams-composite-42",
+            "id": "input-header"
+          }
+        ],
+        "location": {
+          "family": "http",
+          "kind": "http-header",
+          "name": "X-Probe",
+          "occurrence": 0
+        },
+        "grammar": {
+          "kind": "scalar",
+          "segments": [
+            {
+              "kind": "slot",
+              "slot_ref": {
+                "kind": "slot",
+                "scope": "component-header",
+                "id": "slot-header"
+              }
+            }
+          ],
+          "slots": [
+            {
+              "slot_id": "slot-header",
+              "value_type": "string",
+              "sample": "%2527OR%25201%253D1",
+              "grounding": "source-member",
+              "allowed_domain": {
+                "kind": "enum",
+                "values": [
+                  "%2527OR%25201%253D1"
+                ]
+              },
+              "evidence_refs": [
+                {
+                  "kind": "evidence",
+                  "scope": "ams-composite-42",
+                  "id": "evidence-carriers"
+                }
+              ],
+              "validation_only": false
+            }
+          ]
+        },
+        "matcher": {
+          "kind": "exact-string",
+          "value": "%2527OR%25201%253D1",
+          "case_sensitive": true
+        },
+        "transformations": [],
+        "exact_fallback": {
+          "behavior": "exact-utf8",
+          "value_base64": "JTI1MjdPUiUyNTIwMSUyNTNEMQ==",
+          "digest": "sha256:2b7ac700f7fcba1683f8869587221517c822e8da1600c7711a46ce088a03135d"
+        },
+        "validation_only_samples": [],
+        "evidence_refs": [
+          {
+            "kind": "evidence",
+            "scope": "ams-composite-42",
+            "id": "evidence-carriers"
+          }
+        ],
+        "limitations": []
+      },
+      {
+        "component_id": "component-cookie",
+        "description": "Alternate cookie carrier",
+        "source_member_refs": [
+          {
+            "kind": "source-member",
+            "scope": "ams-composite-42",
+            "id": "member-cookie"
+          }
+        ],
+        "input_refs": [
+          {
+            "kind": "test-input",
+            "scope": "ams-composite-42",
+            "id": "input-cookie"
+          }
+        ],
+        "location": {
+          "family": "http",
+          "kind": "http-cookie",
+          "name": "probe",
+          "occurrence": 0
+        },
+        "grammar": {
+          "kind": "scalar",
+          "segments": [
+            {
+              "kind": "slot",
+              "slot_ref": {
+                "kind": "slot",
+                "scope": "component-cookie",
+                "id": "slot-cookie"
+              }
+            }
+          ],
+          "slots": [
+            {
+              "slot_id": "slot-cookie",
+              "value_type": "string",
+              "sample": "%2527OR%25201%253D1",
+              "grounding": "source-member",
+              "allowed_domain": {
+                "kind": "enum",
+                "values": [
+                  "%2527OR%25201%253D1"
+                ]
+              },
+              "evidence_refs": [
+                {
+                  "kind": "evidence",
+                  "scope": "ams-composite-42",
+                  "id": "evidence-carriers"
+                }
+              ],
+              "validation_only": false
+            }
+          ]
+        },
+        "matcher": {
+          "kind": "exact-string",
+          "value": "%2527OR%25201%253D1",
+          "case_sensitive": true
+        },
+        "transformations": [],
+        "exact_fallback": {
+          "behavior": "exact-utf8",
+          "value_base64": "JTI1MjdPUiUyNTIwMSUyNTNEMQ==",
+          "digest": "sha256:2b7ac700f7fcba1683f8869587221517c822e8da1600c7711a46ce088a03135d"
+        },
+        "validation_only_samples": [],
+        "evidence_refs": [
+          {
+            "kind": "evidence",
+            "scope": "ams-composite-42",
+            "id": "evidence-carriers"
+          }
+        ],
+        "limitations": []
+      }
+    ],
+    "obligations": [
+      {
+        "obligation_id": "obligation-root",
+        "coverage_ref": {
+          "kind": "coverage-group",
+          "scope": "ams-composite-42",
+          "id": "coverage-root"
+        },
+        "required_input_refs": [
+          {
+            "kind": "test-input",
+            "scope": "ams-composite-42",
+            "id": "input-query"
+          },
+          {
+            "kind": "test-input",
+            "scope": "ams-composite-42",
+            "id": "input-header"
+          },
+          {
+            "kind": "test-input",
+            "scope": "ams-composite-42",
+            "id": "input-cookie"
+          }
+        ],
+        "required": true
+      },
+      {
+        "obligation_id": "obligation-url",
+        "coverage_ref": {
+          "kind": "component",
+          "scope": "ams-composite-42",
+          "id": "component-url"
+        },
+        "required_input_refs": [
+          {
+            "kind": "test-input",
+            "scope": "ams-composite-42",
+            "id": "input-query"
+          }
+        ],
+        "required": true
+      },
+      {
+        "obligation_id": "obligation-carriers",
+        "coverage_ref": {
+          "kind": "coverage-group",
+          "scope": "ams-composite-42",
+          "id": "coverage-carriers"
+        },
+        "required_input_refs": [
+          {
+            "kind": "test-input",
+            "scope": "ams-composite-42",
+            "id": "input-query"
+          },
+          {
+            "kind": "test-input",
+            "scope": "ams-composite-42",
+            "id": "input-header"
+          },
+          {
+            "kind": "test-input",
+            "scope": "ams-composite-42",
+            "id": "input-cookie"
+          }
+        ],
+        "required": true
+      },
+      {
+        "obligation_id": "obligation-query",
+        "coverage_ref": {
+          "kind": "component",
+          "scope": "ams-composite-42",
+          "id": "component-query"
+        },
+        "required_input_refs": [
+          {
+            "kind": "test-input",
+            "scope": "ams-composite-42",
+            "id": "input-query"
+          }
+        ],
+        "required": true
+      },
+      {
+        "obligation_id": "obligation-header",
+        "coverage_ref": {
+          "kind": "component",
+          "scope": "ams-composite-42",
+          "id": "component-header"
+        },
+        "required_input_refs": [
+          {
+            "kind": "test-input",
+            "scope": "ams-composite-42",
+            "id": "input-header"
+          }
+        ],
+        "required": true
+      },
+      {
+        "obligation_id": "obligation-cookie",
+        "coverage_ref": {
+          "kind": "component",
+          "scope": "ams-composite-42",
+          "id": "component-cookie"
+        },
+        "required_input_refs": [
+          {
+            "kind": "test-input",
+            "scope": "ams-composite-42",
+            "id": "input-cookie"
+          }
+        ],
+        "required": true
+      }
+    ],
+    "coverage": {
+      "root_group_ref": {
+        "kind": "coverage-group",
+        "scope": "ams-composite-42",
+        "id": "coverage-root"
+      },
+      "groups": [
+        {
+          "group_id": "coverage-root",
+          "operator": "all",
+          "minimum_matches": 2,
+          "member_refs": [
+            {
+              "kind": "component",
+              "scope": "ams-composite-42",
+              "id": "component-url"
+            },
+            {
+              "kind": "coverage-group",
+              "scope": "ams-composite-42",
+              "id": "coverage-carriers"
+            }
+          ],
+          "source_member_refs": [
+            {
+              "kind": "source-member",
+              "scope": "ams-composite-42",
+              "id": "member-protocol"
+            },
+            {
+              "kind": "source-member",
+              "scope": "ams-composite-42",
+              "id": "member-authority"
+            },
+            {
+              "kind": "source-member",
+              "scope": "ams-composite-42",
+              "id": "member-resource"
+            },
+            {
+              "kind": "source-member",
+              "scope": "ams-composite-42",
+              "id": "member-query"
+            },
+            {
+              "kind": "source-member",
+              "scope": "ams-composite-42",
+              "id": "member-header"
+            },
+            {
+              "kind": "source-member",
+              "scope": "ams-composite-42",
+              "id": "member-cookie"
+            }
+          ]
+        },
+        {
+          "group_id": "coverage-carriers",
+          "operator": "any",
+          "minimum_matches": 1,
+          "member_refs": [
+            {
+              "kind": "component",
+              "scope": "ams-composite-42",
+              "id": "component-query"
+            },
+            {
+              "kind": "component",
+              "scope": "ams-composite-42",
+              "id": "component-header"
+            },
+            {
+              "kind": "component",
+              "scope": "ams-composite-42",
+              "id": "component-cookie"
+            }
+          ],
+          "source_member_refs": [
+            {
+              "kind": "source-member",
+              "scope": "ams-composite-42",
+              "id": "member-query"
+            },
+            {
+              "kind": "source-member",
+              "scope": "ams-composite-42",
+              "id": "member-header"
+            },
+            {
+              "kind": "source-member",
+              "scope": "ams-composite-42",
+              "id": "member-cookie"
+            }
+          ]
+        }
+      ]
+    },
+    "carrier_equivalence": [
+      {
+        "equivalence_id": "equivalence-query-header",
+        "source_component_ref": {
+          "kind": "component",
+          "scope": "ams-composite-42",
+          "id": "component-query"
+        },
+        "source_input_ref": {
+          "kind": "test-input",
+          "scope": "ams-composite-42",
+          "id": "input-query"
+        },
+        "destination_component_ref": {
+          "kind": "component",
+          "scope": "ams-composite-42",
+          "id": "component-header"
+        },
+        "destination_input_ref": {
+          "kind": "test-input",
+          "scope": "ams-composite-42",
+          "id": "input-header"
+        },
+        "relationship": "alternate-supported-carrier",
+        "evidence_refs": [
+          {
+            "kind": "evidence",
+            "scope": "ams-composite-42",
+            "id": "evidence-carriers"
+          }
+        ]
+      },
+      {
+        "equivalence_id": "equivalence-query-cookie",
+        "source_component_ref": {
+          "kind": "component",
+          "scope": "ams-composite-42",
+          "id": "component-query"
+        },
+        "source_input_ref": {
+          "kind": "test-input",
+          "scope": "ams-composite-42",
+          "id": "input-query"
+        },
+        "destination_component_ref": {
+          "kind": "component",
+          "scope": "ams-composite-42",
+          "id": "component-cookie"
+        },
+        "destination_input_ref": {
+          "kind": "test-input",
+          "scope": "ams-composite-42",
+          "id": "input-cookie"
+        },
+        "relationship": "alternate-supported-carrier",
+        "evidence_refs": [
+          {
+            "kind": "evidence",
+            "scope": "ams-composite-42",
+            "id": "evidence-carriers"
+          }
+        ]
+      }
+    ],
+    "limitations": [
+      "Network and endpoint members are retained but are not represented as WAF obligations until their execution slices are enabled.",
+      "The scope-declined member is retained for complete accounting and is not treated as covered."
+    ],
+    "unsupported_dimensions": [
+      {
+        "dimension": "network-execution",
+        "reason": "The WAF-first slice does not execute network-flow members; this could-not-verify member remains explicit and uncovered.",
+        "source_member_refs": [
+          {
+            "kind": "source-member",
+            "scope": "ams-composite-42",
+            "id": "member-network"
+          }
+        ],
+        "source_artifact_refs": [],
+        "source_input_refs": []
+      },
+      {
+        "dimension": "endpoint-execution",
+        "reason": "The WAF-first slice does not execute endpoint-activity members; this no-checkable-signal member remains explicit and uncovered.",
+        "source_member_refs": [
+          {
+            "kind": "source-member",
+            "scope": "ams-composite-42",
+            "id": "member-endpoint"
+          }
+        ],
+        "source_artifact_refs": [],
+        "source_input_refs": []
+      },
+      {
+        "dimension": "declined-scope",
+        "reason": "CG declined this member under the active scope; it remains explicit and uncovered.",
+        "source_member_refs": [
+          {
+            "kind": "source-member",
+            "scope": "ams-composite-42",
+            "id": "member-scope-declined"
+          }
+        ],
+        "source_artifact_refs": [],
+        "source_input_refs": []
+      }
+    ],
+    "evidence": [
+      {
+        "evidence_id": "evidence-request",
+        "kind": "artifact",
+        "locator": {
+          "uri": "../fixtures/composite-request.http",
+          "digest": "sha256:d14a6a2cf6337786b97f70d9e3251df9ccabd8df1c7f4c42fa5e17984823c892",
+          "media_type": "message/http",
+          "byte_length": 142,
+          "immutable": true
+        }
+      },
+      {
+        "evidence_id": "evidence-carriers",
+        "kind": "source",
+        "locator": {
+          "uri": "../fixtures/waf-rule-carriers.json",
+          "digest": "sha256:4ceb2071f42b5b7bc4cf449b5929055c9d73b12d9fbda792e9a22a8b9d5c7e64",
+          "media_type": "application/json",
+          "byte_length": 577,
+          "immutable": true
+        }
+      }
+    ]
+  },
+  "digest_profile": "rfc8785-sha256-exclude-content_digest-v1",
+  "content_digest": "sha256:4a0acaca9f13380c10fdfdea92bf93560e9d312b0fc8ae7a2027092f3ecfef56"
+}

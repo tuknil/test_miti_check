@@ -1,0 +1,26 @@
+{
+  "rule_set_id": "janus-42-main",
+  "carrier_bindings": [
+    {
+      "carrier": "query",
+      "name": "target",
+      "component_id": "component-url"
+    },
+    {
+      "carrier": "query",
+      "name": "filter",
+      "component_id": "component-query"
+    },
+    {
+      "carrier": "header",
+      "name": "x-probe",
+      "component_id": "component-header"
+    },
+    {
+      "carrier": "cookie",
+      "name": "probe",
+      "component_id": "component-cookie"
+    }
+  ],
+  "claim_rule": "Coverage is limited to the named carrier and selector of each executable rule."
+}

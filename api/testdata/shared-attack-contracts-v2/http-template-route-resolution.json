@@ -1,0 +1,133 @@
+{
+  "illustrative": true,
+  "template_id": "input-http-template-42",
+  "resolver_profiles": {
+    "mitigation_check_result": "mc-http-route-profile.json",
+    "bypass_validation_result": "bv-http-route-profile.json"
+  },
+  "template": {
+    "modality": "http-request-template",
+    "method": "POST",
+    "path_key": "inventory-item-detail",
+    "query": [
+      {
+        "name": "probe",
+        "value": "%2527OR%25201%253D1"
+      }
+    ],
+    "headers": [
+      {
+        "name": "Content-Type",
+        "value": "application/json"
+      },
+      {
+        "name": "X-Janus-Probe",
+        "value": "cg-template-42"
+      }
+    ],
+    "cookies": [
+      {
+        "name": "experiment",
+        "value": "candidate"
+      }
+    ],
+    "body": {
+      "state": "empty",
+      "content_length": 0,
+      "content_base64": "",
+      "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "mitigation_check_result": {
+    "capability": "mitigation-check",
+    "profile_id": "waf-standard@1",
+    "request_resolution": {
+      "template_id": "input-http-template-42",
+      "path_key": "inventory-item-detail",
+      "resolver_id": "mc-approved-route-adapter",
+      "profile_id": "waf-standard@1",
+      "resolver_profile_digest": "sha256:e763e4e3c8f6d3f6c6f11aee7f6931e3f15881489112a0dd87a88637202b5d38",
+      "rendered_request": {
+        "modality": "http-request",
+        "method": "POST",
+        "scheme": "https",
+        "authority": "approved-mc-target.internal",
+        "path": "/inventory/items/42",
+        "query": [
+          {
+            "name": "probe",
+            "value": "%2527OR%25201%253D1"
+          }
+        ],
+        "headers": [
+          {
+            "name": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "name": "X-Janus-Probe",
+            "value": "cg-template-42"
+          }
+        ],
+        "cookies": [
+          {
+            "name": "experiment",
+            "value": "candidate"
+          }
+        ],
+        "body": {
+          "state": "empty",
+          "content_length": 0,
+          "content_base64": "",
+          "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    }
+  },
+  "bypass_validation_result": {
+    "capability": "bypass-validation",
+    "profile_id": "waf-bypass@2",
+    "request_resolution": {
+      "template_id": "input-http-template-42",
+      "path_key": "inventory-item-detail",
+      "resolver_id": "bv-approved-route-adapter",
+      "profile_id": "waf-bypass@2",
+      "resolver_profile_digest": "sha256:ab2e01cafaec47f8615f59d517dcf5d1d29ed76e92133e048814403793f1f1d1",
+      "rendered_request": {
+        "modality": "http-request",
+        "method": "POST",
+        "scheme": "https",
+        "authority": "approved-bv-target.internal",
+        "path": "/inventory/items/42",
+        "query": [
+          {
+            "name": "probe",
+            "value": "%2527OR%25201%253D1"
+          }
+        ],
+        "headers": [
+          {
+            "name": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "name": "X-Janus-Probe",
+            "value": "cg-template-42"
+          }
+        ],
+        "cookies": [
+          {
+            "name": "experiment",
+            "value": "candidate"
+          }
+        ],
+        "body": {
+          "state": "empty",
+          "content_length": 0,
+          "content_base64": "",
+          "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    }
+  }
+}

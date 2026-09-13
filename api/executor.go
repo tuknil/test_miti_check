@@ -35,19 +35,23 @@ import (
 // MitigationCheckResult@1, LLD §10.2). The leading fields are the result envelope;
 // the trailing fields are the full verdict detail (appended, not replaced).
 type RunOutcome struct {
-	Capability     string          `json:"capability"`
-	ContractID     string          `json:"contract_id"`
-	RequestID      string          `json:"request_id"`
-	RunID          string          `json:"run_id"`
-	ResultID       string          `json:"result_id"`
-	TerminalState  string          `json:"terminal_state"`
-	Status         string          `json:"status"`
-	CorrelationID  string          `json:"correlation_id,omitempty"`
-	ResultRef      *ResultRef      `json:"result_ref,omitempty"`
-	EvidenceRefs   []string        `json:"evidence_refs"`
-	RequestSHA256  string          `json:"request_sha256"`
-	UpstreamInputs json.RawMessage `json:"upstream_inputs,omitempty"`
-	InputProvenance *LocatorProvenance `json:"input_provenance,omitempty"`
+	Capability        string                  `json:"capability"`
+	ContractID        string                  `json:"contract_id"`
+	RequestID         string                  `json:"request_id"`
+	RunID             string                  `json:"run_id"`
+	ResultID          string                  `json:"result_id"`
+	TerminalState     string                  `json:"terminal_state"`
+	Status            string                  `json:"status"`
+	CorrelationID     string                  `json:"correlation_id,omitempty"`
+	ResultRef         *ResultRef              `json:"result_ref,omitempty"`
+	EvidenceRefs      []string                `json:"evidence_refs"`
+	RequestSHA256     string                  `json:"request_sha256"`
+	UpstreamInputs    json.RawMessage         `json:"upstream_inputs,omitempty"`
+	InputProvenance   *LocatorProvenance      `json:"input_provenance,omitempty"`
+	ProfileID         string                  `json:"profile_id,omitempty"`
+	ObligationResults []ObligationResult      `json:"obligation_results,omitempty"`
+	Accounting        *CoverageAccounting     `json:"accounting,omitempty"`
+	ApplicationUnit   *AppliedApplicationUnit `json:"application_unit,omitempty"`
 
 	Match     bool     `json:"match"`
 	Expected  Expected `json:"expected"`
