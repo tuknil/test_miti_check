@@ -630,7 +630,19 @@ func validateSharedDefenseRow(row defenseRow, locator, checkLocator ImmutableRes
 	}
 	advertisedDigest, advertisedSize := result.ContentSHA256, result.SizeBytes
 	result.ContentSHA256, result.SizeBytes = "", 0
-	unsigned, err := json.Marshal(result)
+	var unsigned []byte
+	var err error
+	if len(result.CandidateBundle) > 0 {
+		var document map[string]any
+		if err := decodeJSONMap([]byte(row.ResultJSON), &document); err != nil {
+			return sharedCandidateBundle{}, nil, nil, fmt.Errorf("decode Defense Generation shared result: %w", err)
+		}
+		delete(document, "content_sha256")
+		delete(document, "size_bytes")
+		unsigned, err = marshalRFC8785(document)
+	} else {
+		unsigned, err = json.Marshal(result)
+	}
 	if err != nil || sha256Value(unsigned) != advertisedDigest || int64(len(unsigned)) != advertisedSize || advertisedDigest != locator.ContentSHA256 || advertisedSize != locator.SizeBytes {
 		return sharedCandidateBundle{}, nil, nil, errors.New("Defense Generation outer bytes differ from locator")
 	}
