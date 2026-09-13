@@ -32,7 +32,7 @@ type RunWorker struct {
 
 func NewRunWorker(store *RunStore, execute DurableExecutor, publisher ResultPublisher) *RunWorker {
 	return &RunWorker{store: store, execute: execute, publisher: publisher,
-		workerID: "mc-worker-" + hostname() + "-" + newID(), lease: 2 * time.Minute, poll: 500 * time.Millisecond, maxAttempts: 3,
+		workerID: "mc-worker-" + hostname() + "-" + newID(), lease: 10 * time.Minute, poll: 500 * time.Millisecond, maxAttempts: 3,
 		maxVerificationAttempts: 6, verificationBackoff: 5 * time.Second}
 }
 
