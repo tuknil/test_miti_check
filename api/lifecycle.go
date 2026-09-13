@@ -341,6 +341,16 @@ func setCanonicalIntegrity(out *RunOutcome) error {
 	if err != nil {
 		return err
 	}
+	if out.ProfileID != "" {
+		var document any
+		if err := decodeJSONAny(payload, &document); err != nil {
+			return err
+		}
+		payload, err = marshalRFC8785(document)
+		if err != nil {
+			return err
+		}
+	}
 	sum := sha256.Sum256(payload)
 	out.ContentSHA256 = "sha256:" + hex.EncodeToString(sum[:])
 	out.SizeBytes = int64(len(payload))
