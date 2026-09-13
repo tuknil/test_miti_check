@@ -326,7 +326,7 @@ components:
             candidate or test bodies.
         profile_id:
           type: string
-          enum: [waf-standard@1]
+          enum: [waf-standard@1, waf-standard@2]
           description: >
             Required only for shared-attack-contracts-v2. Selects the embedded,
             immutable MC route-adapter profile used for destination-free HTTP templates.
@@ -634,7 +634,7 @@ components:
             verification: { type: string, enum: [physical-and-logical-sha256-verified] }
         profile_id:
           type: string
-          enum: [waf-standard@1]
+          enum: [waf-standard@1, waf-standard@2]
           description: Present only for shared-contract v2 results.
         obligation_results:
           type: array
@@ -755,7 +755,7 @@ components:
         template_id: { type: string, minLength: 1 }
         path_key: { type: string, minLength: 1 }
         resolver_id: { type: string, enum: [mc-approved-route-adapter] }
-        profile_id: { type: string, enum: [waf-standard@1] }
+        profile_id: { type: string, enum: [waf-standard@1, waf-standard@2] }
         resolver_profile_digest: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
         rendered_request:
           $ref: "#/components/schemas/SharedHttpRequest"

@@ -315,15 +315,31 @@ func TestRouteAdapterPreservesTemplateOwnedFieldsAndFailsClosed(t *testing.T) {
 	if err := json.Unmarshal(loadSharedFixture(t, "destination-free-http-request-template.json"), &template); err != nil {
 		t.Fatal(err)
 	}
+	for _, test := range []struct {
+		name, profileID, pathKey, path, digest string
+	}{
+		{"legacy inventory route", sharedV2LegacyProfileID, "inventory-item-detail", "/inventory/items/42", sharedV2LegacyProfileDigest},
+		{"current inventory route", sharedV2ProfileID, "inventory-item-detail", "/inventory/items/42", sharedV2ResolverProfileDigest},
+		{"current AMS2 submit route", sharedV2ProfileID, "public/submit.php", "/public/submit.php", sharedV2ResolverProfileDigest},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			candidate := template
+			candidate.PathKey = test.pathKey
+			resolution, err := resolveSharedTemplate("input-http-template-42", candidate, test.profileID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resolution.TemplateID != "input-http-template-42" || resolution.PathKey != candidate.PathKey || resolution.ProfileID != test.profileID || resolution.ResolverProfileDigest != test.digest || resolution.RenderedRequest.Scheme != "https" || resolution.RenderedRequest.Authority != "approved-mc-target.internal" || resolution.RenderedRequest.Path != test.path {
+				t.Fatalf("resolution = %#v", resolution)
+			}
+			if resolution.RenderedRequest.Method != candidate.Method || !equalHTTPFields(resolution.RenderedRequest.Query, candidate.Query) || !equalHTTPFields(resolution.RenderedRequest.Headers, candidate.Headers) || !equalHTTPFields(resolution.RenderedRequest.Cookies, candidate.Cookies) || resolution.RenderedRequest.Body != candidate.Body {
+				t.Fatal("adapter changed template-owned fields")
+			}
+		})
+	}
 	resolution, err := resolveSharedTemplate("input-http-template-42", template, sharedV2ProfileID)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if resolution.TemplateID != "input-http-template-42" || resolution.PathKey != template.PathKey || resolution.ResolverProfileDigest != sharedV2ResolverProfileDigest || resolution.RenderedRequest.Scheme != "https" || resolution.RenderedRequest.Authority != "approved-mc-target.internal" || resolution.RenderedRequest.Path != "/inventory/items/42" {
-		t.Fatalf("resolution = %#v", resolution)
-	}
-	if resolution.RenderedRequest.Method != template.Method || !equalHTTPFields(resolution.RenderedRequest.Query, template.Query) || !equalHTTPFields(resolution.RenderedRequest.Headers, template.Headers) || !equalHTTPFields(resolution.RenderedRequest.Cookies, template.Cookies) || resolution.RenderedRequest.Body != template.Body {
-		t.Fatal("adapter changed template-owned fields")
 	}
 	mutated := resolution.RenderedRequest
 	mutated.Headers = append([]sharedHTTPField(nil), mutated.Headers...)
@@ -335,6 +351,10 @@ func TestRouteAdapterPreservesTemplateOwnedFieldsAndFailsClosed(t *testing.T) {
 	changed.PathKey = "unknown"
 	if _, err := resolveSharedTemplate("input", changed, sharedV2ProfileID); err == nil {
 		t.Fatal("unknown path accepted")
+	}
+	changed.PathKey = "public/submit.php"
+	if _, err := resolveSharedTemplate("input", changed, sharedV2LegacyProfileID); err == nil {
+		t.Fatal("new route accepted under immutable legacy profile")
 	}
 	if _, err := resolveSharedTemplate("input", template, "unknown@1"); err == nil {
 		t.Fatal("unknown profile accepted")

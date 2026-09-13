@@ -57,7 +57,7 @@ only when a reference-only run executes; inline and local startup remain usable
 without Databricks input configuration.
 
 The WAF-first shared-contract path is additive and selected with
-`route_policy: shared-attack-contracts-v2` and `profile_id: waf-standard@1`.
+`route_policy: shared-attack-contracts-v2` and `profile_id: waf-standard@2`.
 Its request contains only the authenticated CG and DG immutable locators, never
 hydrated producer bodies. It first verifies both outer producer results, then
 validates the embedded `attack-match-semantics@2.0` and
@@ -75,7 +75,8 @@ Non-HTTP inputs in the WAF-first slice receive an explicit `unsupported`
 disposition. Safety stops are likewise retained as case dispositions.
 
 Destination-free `http-request-template` inputs resolve only through the
-embedded `waf-standard@1` profile. The adapter may add only scheme, authority,
+embedded `waf-standard@2` profile. The immutable `waf-standard@1` profile remains
+available for legacy replay. The adapter may add only scheme, authority,
 and path. Each case records its template input ID and path key, resolver and
 profile IDs, immutable resolver/profile digest, and exact rendered request.
 Unknown profiles or path keys fail closed. Results add `profile_id`, complete

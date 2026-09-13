@@ -1,0 +1,10 @@
+{
+  "manifest_version": 1,
+  "profile_id": "waf-standard@2",
+  "resolver_id": "mc-approved-route-adapter",
+  "registry_id": "janus-approved-test-routes",
+  "relative_path": "mc-http-route-profile-v2.json",
+  "sha256": "sha256:a49bc4e962985f5bd6aa117228e44002a1a617e62544fb87757aa261d4a6f404",
+  "byte_length": 441,
+  "resolver_profile_digest": "sha256:01f6033b5b09db48056adc8a0d47083f4020cf18d71913c69e283f644ec41a94"
+}

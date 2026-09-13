@@ -19,9 +19,11 @@ import (
 
 const (
 	sharedV2RoutePolicy           = "shared-attack-contracts-v2"
-	sharedV2ProfileID             = "waf-standard@1"
+	sharedV2LegacyProfileID       = "waf-standard@1"
+	sharedV2ProfileID             = "waf-standard@2"
 	sharedV2ResolverID            = "mc-approved-route-adapter"
-	sharedV2ResolverProfileDigest = "sha256:e28f9574b07194222a317dfc4f03293beafb6e3613b87452a4191652fd6b6b1a"
+	sharedV2LegacyProfileDigest   = "sha256:e28f9574b07194222a317dfc4f03293beafb6e3613b87452a4191652fd6b6b1a"
+	sharedV2ResolverProfileDigest = "sha256:01f6033b5b09db48056adc8a0d47083f4020cf18d71913c69e283f644ec41a94"
 	semanticsDigestProfile        = "rfc8785-sha256-exclude-semantics_digest-v1"
 	sourceProjectionDigestProfile = "rfc8785-sha256-cg-source-projection-v1"
 	candidateBundleDigestProfile  = "rfc8785-sha256-exclude-bundle_digest-and-candidate_digest-v1"
@@ -285,7 +287,7 @@ func validateV2LocatorRequest(req SubmitMitigationCheckRequest) []string {
 	if req.RoutePolicy != sharedV2RoutePolicy {
 		bad = append(bad, "route_policy")
 	}
-	if req.ProfileID != sharedV2ProfileID {
+	if req.ProfileID != sharedV2ProfileID && req.ProfileID != sharedV2LegacyProfileID {
 		bad = append(bad, "profile_id")
 	}
 	if req.DefenseResult == nil || validateImmutableLocator(*req.DefenseResult, capDefenseGeneration) != nil {
@@ -1340,22 +1342,27 @@ func resolveSharedTemplate(inputID string, template sharedHTTPInput, profileID s
 	if embeddedRouteProfileErr != nil {
 		return HttpRequestTemplateResolution{}, fmt.Errorf("route profile integrity: %w", embeddedRouteProfileErr)
 	}
-	if profileID != sharedV2ProfileID {
+	profile, ok := embeddedRouteProfiles[profileID]
+	if !ok {
 		return HttpRequestTemplateResolution{}, errors.New("unknown route profile")
 	}
-	if template.Modality != "http-request-template" || template.PathKey != "inventory-item-detail" {
+	if template.Modality != "http-request-template" {
+		return HttpRequestTemplateResolution{}, errors.New("route adapter accepts only http-request-template")
+	}
+	route, ok := profile.Routes[template.PathKey]
+	if !ok {
 		return HttpRequestTemplateResolution{}, errors.New("unknown path_key")
 	}
 	rendered := template
 	rendered.Modality = "http-request"
 	rendered.PathKey = ""
-	rendered.Scheme = "https"
-	rendered.Authority = "approved-mc-target.internal"
-	rendered.Path = "/inventory/items/42"
+	rendered.Scheme = route.Scheme
+	rendered.Authority = route.Authority
+	rendered.Path = route.Path
 	if err := verifyTemplateOwnedFields(template, rendered); err != nil {
 		return HttpRequestTemplateResolution{}, err
 	}
-	return HttpRequestTemplateResolution{inputID, template.PathKey, sharedV2ResolverID, profileID, sharedV2ResolverProfileDigest, rendered}, nil
+	return HttpRequestTemplateResolution{inputID, template.PathKey, profile.ResolverID, profileID, profile.Digest, rendered}, nil
 }
 
 func verifyTemplateOwnedFields(template, rendered sharedHTTPInput) error {

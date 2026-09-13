@@ -45,12 +45,41 @@ type sharedSchemaCatalog struct {
 }
 
 var embeddedSharedCatalog, embeddedSharedCatalogErr = loadSharedSchemaCatalog(sharedContractFiles)
-var embeddedRouteProfileErr = verifyEmbeddedRouteProfile(sharedContractFiles)
+var embeddedRouteProfiles, embeddedRouteProfileErr = loadEmbeddedRouteProfiles(sharedContractFiles)
 
-func verifyEmbeddedRouteProfile(files fs.FS) error {
-	manifestBytes, err := fs.ReadFile(files, "contracts/shared-attack-contracts/profiles/manifest.json")
+type approvedRoute struct {
+	Scheme    string `json:"scheme"`
+	Authority string `json:"authority"`
+	Path      string `json:"path"`
+}
+
+type embeddedRouteProfile struct {
+	ProfileID  string                   `json:"profile_id"`
+	ResolverID string                   `json:"resolver_id"`
+	RegistryID string                   `json:"registry_id"`
+	Routes     map[string]approvedRoute `json:"routes"`
+	Digest     string                   `json:"-"`
+}
+
+func loadEmbeddedRouteProfiles(files fs.FS) (map[string]embeddedRouteProfile, error) {
+	profiles := make(map[string]embeddedRouteProfile, 2)
+	for _, manifestName := range []string{"manifest.json", "manifest-v2.json"} {
+		profile, err := loadEmbeddedRouteProfile(files, manifestName)
+		if err != nil {
+			return nil, err
+		}
+		if _, duplicate := profiles[profile.ProfileID]; duplicate {
+			return nil, errors.New("duplicate route profile identity")
+		}
+		profiles[profile.ProfileID] = profile
+	}
+	return profiles, nil
+}
+
+func loadEmbeddedRouteProfile(files fs.FS, manifestName string) (embeddedRouteProfile, error) {
+	manifestBytes, err := fs.ReadFile(files, "contracts/shared-attack-contracts/profiles/"+manifestName)
 	if err != nil {
-		return err
+		return embeddedRouteProfile{}, err
 	}
 	var manifest struct {
 		ManifestVersion       int    `json:"manifest_version"`
@@ -63,32 +92,35 @@ func verifyEmbeddedRouteProfile(files fs.FS) error {
 		ResolverProfileDigest string `json:"resolver_profile_digest"`
 	}
 	if err := decodeStrictJSON(manifestBytes, &manifest); err != nil {
-		return err
+		return embeddedRouteProfile{}, err
 	}
-	if manifest.ManifestVersion != 1 || manifest.ProfileID != sharedV2ProfileID || manifest.ResolverID != sharedV2ResolverID || manifest.RegistryID != "janus-approved-test-routes" || manifest.RelativePath != "mc-http-route-profile.json" || manifest.ResolverProfileDigest != sharedV2ResolverProfileDigest {
-		return errors.New("route profile manifest identity differs")
+	expectedFiles := map[string]string{sharedV2LegacyProfileID: "mc-http-route-profile.json", sharedV2ProfileID: "mc-http-route-profile-v2.json"}
+	expectedDigests := map[string]string{sharedV2LegacyProfileID: sharedV2LegacyProfileDigest, sharedV2ProfileID: sharedV2ResolverProfileDigest}
+	if manifest.ManifestVersion != 1 || manifest.ResolverID != sharedV2ResolverID || manifest.RegistryID != "janus-approved-test-routes" || expectedFiles[manifest.ProfileID] != manifest.RelativePath || expectedDigests[manifest.ProfileID] != manifest.ResolverProfileDigest {
+		return embeddedRouteProfile{}, errors.New("route profile manifest identity differs")
 	}
 	profileBytes, err := fs.ReadFile(files, "contracts/shared-attack-contracts/profiles/"+manifest.RelativePath)
 	if err != nil || int64(len(profileBytes)) != manifest.ByteLength || sha256Value(profileBytes) != manifest.SHA256 {
-		return errors.New("route profile bytes differ from manifest")
+		return embeddedRouteProfile{}, errors.New("route profile bytes differ from manifest")
 	}
-	var profile struct {
-		ProfileID  string                                              `json:"profile_id"`
-		ResolverID string                                              `json:"resolver_id"`
-		RegistryID string                                              `json:"registry_id"`
-		Routes     map[string]struct{ Scheme, Authority, Path string } `json:"routes"`
-	}
+	var profile embeddedRouteProfile
 	if err := decodeStrictJSON(profileBytes, &profile); err != nil {
-		return err
+		return embeddedRouteProfile{}, err
 	}
-	route, ok := profile.Routes["inventory-item-detail"]
 	var profileValue any
 	canonicalErr := decodeJSONAny(profileBytes, &profileValue)
 	canonical, err := marshalRFC8785(profileValue)
-	if canonicalErr != nil || err != nil || profile.ProfileID != sharedV2ProfileID || profile.ResolverID != sharedV2ResolverID || profile.RegistryID != "janus-approved-test-routes" || len(profile.Routes) != 1 || !ok || route.Scheme != "https" || route.Authority != "approved-mc-target.internal" || route.Path != "/inventory/items/42" || sha256Value(canonical) != manifest.ResolverProfileDigest {
-		return errors.New("route profile content differs from approved registry")
+	inventory := profile.Routes["inventory-item-detail"]
+	submit, hasSubmit := profile.Routes["public/submit.php"]
+	validRoutes := len(profile.Routes) == 1 && profile.ProfileID == sharedV2LegacyProfileID && !hasSubmit
+	if profile.ProfileID == sharedV2ProfileID {
+		validRoutes = len(profile.Routes) == 2 && hasSubmit && submit == (approvedRoute{Scheme: "https", Authority: "approved-mc-target.internal", Path: "/public/submit.php"})
 	}
-	return nil
+	if canonicalErr != nil || err != nil || profile.ProfileID != manifest.ProfileID || profile.ResolverID != manifest.ResolverID || profile.RegistryID != manifest.RegistryID || inventory != (approvedRoute{Scheme: "https", Authority: "approved-mc-target.internal", Path: "/inventory/items/42"}) || !validRoutes || sha256Value(canonical) != manifest.ResolverProfileDigest {
+		return embeddedRouteProfile{}, errors.New("route profile content differs from approved registry")
+	}
+	profile.Digest = manifest.ResolverProfileDigest
+	return profile, nil
 }
 
 func validateSharedSchema(schemaID string, document any) error {
