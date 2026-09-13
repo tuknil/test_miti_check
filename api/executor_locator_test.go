@@ -105,6 +105,34 @@ func TestLocatorResolutionHydratesVolumeAndUsesRegisteredHTTPSelection(t *testin
 	}
 }
 
+func TestVerifyCheckRowAcceptsSharedV2LocatorOverOuterV1Envelope(t *testing.T) {
+	resolver, _, check, source := locatorFixture(t, false)
+	check.ContractID = "check-generation@2.1"
+	var completion map[string]any
+	if err := decodeJSONMap([]byte(source.check[0].CompletionJSON), &completion); err != nil {
+		t.Fatal(err)
+	}
+	completion["result_contract_type"] = "check-generation"
+	completion["result_contract_version"] = "2.1"
+	encoded, err := marshalSortedJSON(completion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source.check[0].CompletionJSON = string(encoded)
+
+	runResult, _, err := resolver.verifyCheckRow(context.Background(), source.check[0], check)
+	if err != nil {
+		t.Fatalf("verifyCheckRow() unexpected error: %v", err)
+	}
+	var nested map[string]any
+	if err := decodeJSONMap(runResult, &nested); err != nil {
+		t.Fatal(err)
+	}
+	if stringValue(nested["contract_id"]) != "check-generation@2.1" {
+		t.Fatalf("nested contract = %q", stringValue(nested["contract_id"]))
+	}
+}
+
 func TestRFC8785LogicalCanonicalizationNormalizesNumbersAndStrings(t *testing.T) {
 	var value any
 	if err := decodeJSONAny([]byte(`{"whole":1.0,"small":0.0000001,"body":"a&b"}`), &value); err != nil {

@@ -520,7 +520,11 @@ func (r *databricksLocatorResolver) verifyCheckRow(ctx context.Context, row chec
 	}
 	completionRef, _ := completion["result_ref"].(map[string]any)
 	completionSize, sizeOK := int64Value(completion["size_bytes"])
-	if stringValue(completion["capability"]) != locator.Capability || stringValue(completion["contract_id"]) != "capability-completion@1.0" || stringValue(completion["result_contract_type"]) != "check-generation-result" || stringValue(completion["result_contract_version"]) != "1.0" || stringValue(completion["result_id"]) != locator.ResultID || stringValue(completion["run_id"]) != locator.RunID || stringValue(completion["request_id"]) != locator.RequestID || stringValue(completion["correlation_id"]) != locator.CorrelationID || stringValue(completion["terminal_state"]) != locator.TerminalState || stringValue(completion["status"]) != locator.Status || stringValue(completion["content_sha256"]) != locator.ContentSHA256 || !sizeOK || completionSize != locator.SizeBytes || stringValue(completionRef["system"]) != "databricks" || stringValue(completionRef["catalog"]) != locatorCatalog || stringValue(completionRef["schema"]) != checkSchema || stringValue(completionRef["table"]) != checkTable || stringValue(completionRef["key"]) != locator.ResultID {
+	resultContractType, resultContractVersion := "check-generation-result", "1.0"
+	if locator.ContractID == "check-generation@2.1" {
+		resultContractType, resultContractVersion = "check-generation", "2.1"
+	}
+	if stringValue(completion["capability"]) != locator.Capability || stringValue(completion["contract_id"]) != "capability-completion@1.0" || stringValue(completion["result_contract_type"]) != resultContractType || stringValue(completion["result_contract_version"]) != resultContractVersion || stringValue(completion["result_id"]) != locator.ResultID || stringValue(completion["run_id"]) != locator.RunID || stringValue(completion["request_id"]) != locator.RequestID || stringValue(completion["correlation_id"]) != locator.CorrelationID || stringValue(completion["terminal_state"]) != locator.TerminalState || stringValue(completion["status"]) != locator.Status || stringValue(completion["content_sha256"]) != locator.ContentSHA256 || !sizeOK || completionSize != locator.SizeBytes || stringValue(completionRef["system"]) != "databricks" || stringValue(completionRef["catalog"]) != locatorCatalog || stringValue(completionRef["schema"]) != checkSchema || stringValue(completionRef["table"]) != checkTable || stringValue(completionRef["key"]) != locator.ResultID {
 		return nil, nil, fmt.Errorf("Check Generation completion identity differs from locator")
 	}
 	upstreamRefs, upstreamOK := completion["upstream_result_refs"].([]any)
@@ -532,7 +536,7 @@ func (r *databricksLocatorResolver) verifyCheckRow(ctx context.Context, row chec
 	for _, key := range []string{"capability", "result_id", "run_id", "request_id", "correlation_id", "terminal_state", "status", "upstream_result_refs", "evidence_refs", "subject_record_revision_id", "characterization_revision_id", "created_at"} {
 		core[key] = completion[key]
 	}
-	core["contract_id"] = locator.ContractID
+	core["contract_id"] = "check-generation-result@1.0"
 	var nested any
 	if err := decodeJSONAny(stored.RunResult, &nested); err != nil {
 		return nil, nil, err

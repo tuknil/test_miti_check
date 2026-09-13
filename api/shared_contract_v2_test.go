@@ -380,10 +380,18 @@ func regexpMust(t *testing.T, pattern string) *regexp.Regexp {
 
 func TestV2RequestIsCompactAndLegacyReplayRemainsValid(t *testing.T) {
 	_, defense, check, _ := locatorFixture(t, false)
+	check.ContractID = "check-generation@2.1"
 	request := SubmitMitigationCheckRequest{ContractID: contractID, RequestID: "request", CorrelationID: defense.CorrelationID, RoutePolicy: sharedV2RoutePolicy, ProfileID: sharedV2ProfileID, DefenseResult: &defense, CheckResult: &check, ExecutionMode: execInMemory}
 	if fields := validate(request); len(fields) != 0 {
 		t.Fatalf("valid v2 request: %v", fields)
 	}
+	legacyCheck := check
+	legacyCheck.ContractID = "check-generation-result@1.0"
+	request.CheckResult = &legacyCheck
+	if fields := validate(request); !hasField(fields, "check_result") {
+		t.Fatalf("shared v2 request accepted legacy Check Generation locator: %v", fields)
+	}
+	request.CheckResult = &check
 	request.TestBasis = json.RawMessage(`{}`)
 	if fields := validate(request); !hasField(fields, "inline_content") {
 		t.Fatalf("hydrated body accepted: %v", fields)

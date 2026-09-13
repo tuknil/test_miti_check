@@ -291,7 +291,7 @@ func validateV2LocatorRequest(req SubmitMitigationCheckRequest) []string {
 	if req.DefenseResult == nil || validateImmutableLocator(*req.DefenseResult, capDefenseGeneration) != nil {
 		bad = append(bad, "defense_result")
 	}
-	if req.CheckResult == nil || validateImmutableLocator(*req.CheckResult, capCheckGeneration) != nil {
+	if req.CheckResult == nil || validateSharedV2CheckLocator(*req.CheckResult) != nil {
 		bad = append(bad, "check_result")
 	}
 	if req.DefenseResult != nil && req.CheckResult != nil && req.DefenseResult.CorrelationID != req.CheckResult.CorrelationID {
@@ -310,6 +310,15 @@ func validateV2LocatorRequest(req SubmitMitigationCheckRequest) []string {
 		bad = append(bad, "execution_mode")
 	}
 	return uniqueStrings(bad)
+}
+
+func validateSharedV2CheckLocator(locator ImmutableResultLocator) error {
+	if locator.ContractID != "check-generation@2.1" {
+		return errors.New("shared-contract Check Generation locator contract is invalid")
+	}
+	legacyEnvelope := locator
+	legacyEnvelope.ContractID = "check-generation-result@1.0"
+	return validateImmutableLocator(legacyEnvelope, capCheckGeneration)
 }
 
 func (r *databricksSharedV2Resolver) ResolveV2(ctx context.Context, defense, check ImmutableResultLocator) (sharedResolvedInputs, error) {
