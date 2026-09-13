@@ -468,6 +468,7 @@ func validateSharedCompleteness(cg map[string]any, semantics sharedSemantics) er
 		obligationIDs[obligation.ObligationID] = true
 	}
 	referencedComponents, referencedObligations := map[string]bool{}, map[string]bool{}
+	semanticsReferencedArtifacts := map[string]bool{}
 	for id, member := range members {
 		outer := outerMembers[id]
 		if member.SignalID != stringValue(outer["signal_id"]) || member.AffectedArtifactID != stringValue(outer["affected_artifact_id"]) || member.TerminalState != sharedTerminalStateFromCG(stringValue(outer["terminal_state"])) || !sameStringSetLocal(refIDs(member.ArtifactRefs), stringSlice(outer["artifact_refs"])) {
@@ -501,9 +502,13 @@ func validateSharedCompleteness(cg map[string]any, semantics sharedSemantics) er
 			return fmt.Errorf("source artifact %s content digest differs", id)
 		}
 		semanticRef := mapValue(outer["attack_match_semantics_ref"])
-		if semanticRef == nil || stringValue(semanticRef["semantics_id"]) != semantics.SemanticsID {
+		if semanticRef == nil {
+			continue
+		}
+		if stringValue(semanticRef["semantics_id"]) != semantics.SemanticsID {
 			return fmt.Errorf("source artifact %s semantics identity differs", id)
 		}
+		semanticsReferencedArtifacts[id] = true
 		for _, componentID := range stringSlice(semanticRef["component_ids"]) {
 			if !componentIDs[componentID] {
 				return fmt.Errorf("source artifact %s invents component", id)
@@ -593,6 +598,11 @@ func validateSharedCompleteness(cg map[string]any, semantics sharedSemantics) er
 	}
 	if intersectsLocal(representedArtifacts, unsupportedArtifacts) || len(representedArtifacts)+len(unsupportedArtifacts) != len(artifacts) {
 		return errors.New("represented/unsupported source artifact partition is incomplete")
+	}
+	for id := range artifacts {
+		if representedArtifacts[id] != semanticsReferencedArtifacts[id] {
+			return fmt.Errorf("source artifact %s semantics representation differs", id)
+		}
 	}
 	if intersectsLocal(representedInputs, unsupportedInputs) || len(representedInputs)+len(unsupportedInputs) != len(outerInputs) {
 		return errors.New("represented/unsupported source input partition is incomplete")
