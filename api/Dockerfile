@@ -5,6 +5,7 @@ ENV GONOSUMDB=off \
     GOPRIVATE=it.att.com
 WORKDIR /src
 COPY go.mod go.sum ./
+COPY third_party/jsonschema ./third_party/jsonschema
 RUN --mount=type=secret,id=go_proxy,required=true \
     GOPROXY="$(cat /run/secrets/go_proxy)" go mod download
 COPY . .
