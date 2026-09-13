@@ -470,7 +470,7 @@ func validateSharedCompleteness(cg map[string]any, semantics sharedSemantics) er
 	referencedComponents, referencedObligations := map[string]bool{}, map[string]bool{}
 	for id, member := range members {
 		outer := outerMembers[id]
-		if member.SignalID != stringValue(outer["signal_id"]) || member.AffectedArtifactID != stringValue(outer["affected_artifact_id"]) || member.TerminalState != stringValue(outer["terminal_state"]) || !sameStringSetLocal(refIDs(member.ArtifactRefs), stringSlice(outer["artifact_refs"])) {
+		if member.SignalID != stringValue(outer["signal_id"]) || member.AffectedArtifactID != stringValue(outer["affected_artifact_id"]) || member.TerminalState != sharedTerminalStateFromCG(stringValue(outer["terminal_state"])) || !sameStringSetLocal(refIDs(member.ArtifactRefs), stringSlice(outer["artifact_refs"])) {
 			return fmt.Errorf("source member ancestry differs for %s", id)
 		}
 		positive := member.TerminalState == "verified" || member.TerminalState == "signal-produced"
@@ -598,6 +598,13 @@ func validateSharedCompleteness(cg map[string]any, semantics sharedSemantics) er
 		return errors.New("represented/unsupported source input partition is incomplete")
 	}
 	return nil
+}
+
+func sharedTerminalStateFromCG(value string) string {
+	if value == "no-checkable-artifact" {
+		return "no-checkable-signal"
+	}
+	return value
 }
 
 func validateSharedDefenseRow(row defenseRow, locator, checkLocator ImmutableResultLocator, cg map[string]any, semantics sharedSemantics) (sharedCandidateBundle, map[string][]byte, []string, error) {

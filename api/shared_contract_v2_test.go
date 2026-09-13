@@ -442,6 +442,20 @@ func TestCoverageAccountingRelationshipsAndDispositions(t *testing.T) {
 	}
 }
 
+func TestSharedTerminalStateCompatibilityIsNarrow(t *testing.T) {
+	for source, expected := range map[string]string{
+		"verified":              "verified",
+		"signal-produced":       "signal-produced",
+		"could-not-verify":      "could-not-verify",
+		"no-checkable-artifact": "no-checkable-signal",
+		"scope-declined":        "scope-declined",
+	} {
+		if actual := sharedTerminalStateFromCG(source); actual != expected {
+			t.Fatalf("sharedTerminalStateFromCG(%q) = %q, want %q", source, actual, expected)
+		}
+	}
+}
+
 func TestOpenAPIV2SchemaReferencesAreSynchronized(t *testing.T) {
 	spec := string(openapiSpec)
 	for _, required := range []string{"shared-attack-contracts-v2", "profile_id:", "obligation_results:", "CoverageAccounting:", "HttpRequestTemplateResolution:", "AppliedApplicationUnit:"} {
