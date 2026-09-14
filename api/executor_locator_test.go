@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -262,12 +264,61 @@ func TestCompatibilityDispatchPreservesInlineRequestWhenUpstreamModeEnabled(t *t
 	}
 }
 
-func TestLocatorSQLContextIsBounded(t *testing.T) {
-	ctx, cancel := locatorSQLContext(context.Background())
-	defer cancel()
-	deadline, ok := ctx.Deadline()
-	if !ok || time.Until(deadline) <= 0 || time.Until(deadline) > locatorSQLTimeout {
-		t.Fatalf("locator SQL deadline = %v, present=%t", deadline, ok)
+func TestStatementLocatorUsesBoundedNamedQuery(t *testing.T) {
+	var request locatorStatementRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/2.0/sql/statements" || r.Header.Get("Authorization") != "Bearer secret" {
+			t.Fatalf("unexpected request path=%q authorization=%q", r.URL.Path, r.Header.Get("Authorization"))
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"status":{"state":"SUCCEEDED"},"result":{"data_array":[]}}`))
+	}))
+	defer server.Close()
+	source := newStatementLocatorRowSource(locatorDatabricksConfig{baseURL: server.URL, token: "secret", warehouseID: "warehouse", timeout: time.Second}, server.Client())
+	rows, err := source.Check(context.Background(), "check-generation-result:run")
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("Check() rows=%v err=%v", rows, err)
+	}
+	if request.WarehouseID != "warehouse" || request.WaitTimeout != "5s" || len(request.Parameters) != 1 || request.Parameters[0] != (locatorStatementParameter{Name: "result_id", Value: "check-generation-result:run", Type: "STRING"}) {
+		t.Fatalf("statement request = %+v", request)
+	}
+	if !strings.Contains(request.Statement, "WHERE result_id = :result_id LIMIT 2") {
+		t.Fatalf("statement is not bounded and parameterized: %s", request.Statement)
+	}
+}
+
+func TestStatementLocatorReturnsAtHTTPDeadline(t *testing.T) {
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release
+	}))
+	t.Cleanup(func() {
+		close(release)
+		server.Close()
+	})
+	timeout := 50 * time.Millisecond
+	source := newStatementLocatorRowSource(locatorDatabricksConfig{baseURL: server.URL, token: "secret", warehouseID: "warehouse", timeout: timeout}, &http.Client{Timeout: timeout})
+	started := time.Now()
+	_, err := source.Defense(context.Background(), "defense-generation-result:test")
+	if err == nil || time.Since(started) > time.Second {
+		t.Fatalf("bounded request duration=%s err=%v", time.Since(started), err)
+	}
+}
+
+func TestLocatorDatabricksConfigDerivesDSNCompatibility(t *testing.T) {
+	t.Setenv("DATABRICKS_HOST", "")
+	t.Setenv("DATABRICKS_TOKEN", "")
+	t.Setenv("DATABRICKS_WAREHOUSE_ID", "")
+	t.Setenv("DATABRICKS_TIMEOUT", "7s")
+	t.Setenv("DATABRICKS_DSN", "token:secret@example.test/sql/1.0/warehouses/warehouse-1")
+	config, err := locatorDatabricksConfigFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.baseURL != "https://example.test" || config.token != "secret" || config.warehouseID != "warehouse-1" || config.timeout != 7*time.Second {
+		t.Fatalf("derived config = %+v", config)
 	}
 }
 

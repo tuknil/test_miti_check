@@ -18,6 +18,23 @@ type ResultVerifier interface {
 	Verify(context.Context, RunOutcome, []byte) error
 }
 
+type executionProgressReporter func(context.Context, string, string) error
+type executionProgressContextKey struct{}
+
+func withExecutionProgressReporter(ctx context.Context, reporter executionProgressReporter) context.Context {
+	return context.WithValue(ctx, executionProgressContextKey{}, reporter)
+}
+
+func reportExecutionProgress(ctx context.Context, phase, message string) {
+	reporter, _ := ctx.Value(executionProgressContextKey{}).(executionProgressReporter)
+	if reporter == nil {
+		return
+	}
+	if err := reporter(ctx, phase, message); err != nil {
+		logLifecycle("progress_update_failed", DurableRun{}, map[string]any{"phase": phase, "error": err.Error()})
+	}
+}
+
 type RunWorker struct {
 	store                   *RunStore
 	execute                 DurableExecutor
@@ -64,6 +81,16 @@ func (w *RunWorker) Run(ctx context.Context) {
 
 func (w *RunWorker) executeOne(parent context.Context, run DurableRun) {
 	executionCtx, cancelExecution := context.WithCancel(parent)
+	executionCtx = withExecutionProgressReporter(executionCtx, func(ctx context.Context, phase, message string) error {
+		written, err := w.store.UpdateProgress(ctx, run.RunID, w.workerID, run.LeaseToken, phase, message)
+		if err != nil {
+			return err
+		}
+		if !written {
+			return fmt.Errorf("worker no longer owns the execution lease")
+		}
+		return nil
+	})
 	heartbeatCtx, stopHeartbeat := context.WithCancel(parent)
 	done := make(chan struct{})
 	defer func() {

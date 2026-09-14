@@ -324,10 +324,12 @@ func validateSharedV2CheckLocator(locator ImmutableResultLocator) error {
 }
 
 func (r *databricksSharedV2Resolver) ResolveV2(ctx context.Context, defense, check ImmutableResultLocator) (sharedResolvedInputs, error) {
+	reportExecutionProgress(ctx, "resolving-check-result", "Resolving immutable Check Generation result")
 	checkRows, err := r.source.Check(ctx, check.ResultID)
 	if err != nil || len(checkRows) != 1 {
 		return sharedResolvedInputs{}, fmt.Errorf("resolve Check Generation locator: rows=%d: %w", len(checkRows), err)
 	}
+	reportExecutionProgress(ctx, "verifying-check-result", "Verifying Check Generation result integrity")
 	cgRaw, evidence, err := r.verifyCheckRow(ctx, checkRows[0], check)
 	if err != nil {
 		return sharedResolvedInputs{}, err
@@ -336,14 +338,17 @@ func (r *databricksSharedV2Resolver) ResolveV2(ctx context.Context, defense, che
 	if err := decodeStrictJSON(cgRaw, &cg); err != nil {
 		return sharedResolvedInputs{}, fmt.Errorf("strict Check Generation JSON: %w", err)
 	}
+	reportExecutionProgress(ctx, "validating-attack-semantics", "Validating complete attack semantics and obligations")
 	semantics, err := validateSharedCGDocument(cg)
 	if err != nil {
 		return sharedResolvedInputs{}, err
 	}
+	reportExecutionProgress(ctx, "resolving-defense-result", "Resolving immutable Defense Generation result")
 	defenseRows, err := r.source.Defense(ctx, defense.ResultID)
 	if err != nil || len(defenseRows) != 1 {
 		return sharedResolvedInputs{}, fmt.Errorf("resolve Defense Generation locator: rows=%d: %w", len(defenseRows), err)
 	}
+	reportExecutionProgress(ctx, "validating-candidate-bundle", "Validating the complete candidate bundle")
 	bundle, contents, defenseEvidence, err := validateSharedDefenseRow(defenseRows[0], defense, check, cg, semantics)
 	if err != nil {
 		return sharedResolvedInputs{}, err
@@ -1019,6 +1024,7 @@ func executeSharedContractV2(ctx context.Context, req SubmitMitigationCheckReque
 	if err != nil {
 		return couldNotTest(out, "shared-contract verification failed: "+err.Error())
 	}
+	reportExecutionProgress(ctx, "preparing-application-unit", "Preparing the atomic WAF application unit")
 	waf, applied, err := prepareSharedWAF(resolved.Bundle, resolved.ArtifactBytes)
 	if err != nil {
 		return couldNotTest(out, "atomic application unit rejected: "+err.Error())
@@ -1026,6 +1032,7 @@ func executeSharedContractV2(ctx context.Context, req SubmitMitigationCheckReque
 	out.ApplicationUnit = &applied
 	out.InputProvenance = &resolved.Provenance
 	out.EvidenceRefs = append([]string{}, resolved.EvidenceRefs...)
+	reportExecutionProgress(ctx, "starting-validation-substrate", "Starting the bounded validation substrate")
 	sb, reason := bringUpInMemorySubstrate(ctx, &out, SubstrateSpec{Image: out.Substrate.Image}, runID)
 	if reason != "" {
 		return couldNotTest(out, reason)
@@ -1040,9 +1047,16 @@ func executeSharedContractV2(ctx context.Context, req SubmitMitigationCheckReque
 		inputs[input.InputID] = input
 	}
 	blocked, notBlocked, safety, unsupported := 0, 0, 0, 0
+	totalCases := 0
+	for _, obligation := range resolved.Semantics.Obligations {
+		totalCases += len(obligation.RequiredInputRefs)
+	}
+	executedCases := 0
 	for _, obligation := range resolved.Semantics.Obligations {
 		result := ObligationResult{ObligationID: obligation.ObligationID, CaseResults: make([]ObligationCaseResult, 0, len(obligation.RequiredInputRefs))}
 		for _, ref := range obligation.RequiredInputRefs {
+			executedCases++
+			reportExecutionProgress(ctx, "executing-obligations", fmt.Sprintf("Executing obligation case %d of %d", executedCases, totalCases))
 			caseResult := executeSharedCase(ctx, sb.base, inputs[ref.ID], resolved.CGDocument, req.ProfileID, waf)
 			switch caseResult.Disposition {
 			case "blocked":
@@ -1072,6 +1086,7 @@ func executeSharedContractV2(ctx context.Context, req SubmitMitigationCheckReque
 	}
 	work := blocked + notBlocked + safety + unsupported
 	out.Accounting = &CoverageAccounting{RequiredObligationCount: len(resolved.Semantics.Obligations), AccountedObligationCount: len(out.ObligationResults), SourceMemberCount: len(resolved.Semantics.SourceBinding.Members), RepresentedSourceMemberCount: len(represented), UnsupportedSourceMemberCount: len(unsupportedMembers), RequiredWorkItemCount: work, DisposedWorkItemCount: work}
+	reportExecutionProgress(ctx, "validating-accounting", "Validating complete obligation and source accounting")
 	if err := validateSharedOutcomeAccounting(resolved.Semantics, out.ObligationResults, *out.Accounting); err != nil {
 		out.TerminalState = stateMalfunction
 		out.Actual.Detail = "shared-contract accounting invariant failed: " + err.Error()
