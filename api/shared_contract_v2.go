@@ -1093,6 +1093,7 @@ func executeSharedContractV2(ctx context.Context, req SubmitMitigationCheckReque
 		out.ProseSummary = "Could not persist an incompletely accounted shared-contract result."
 		return out
 	}
+	reportExecutionProgress(ctx, "accounting-validated", "Complete obligation and source accounting is valid")
 	if safety > 0 || unsupported > 0 {
 		out.TerminalState = stateCouldNotTest
 	} else if notBlocked > 0 {

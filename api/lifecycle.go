@@ -306,6 +306,7 @@ func executeDurableRun(ctx context.Context, run DurableRun) (RunOutcome, error) 
 	ctx, cancel := executionContext(ctx)
 	defer cancel()
 	out := executeRequestedScenario(ctx, req, run.RunID, *run.ResultID)
+	reportExecutionProgress(ctx, "finalizing-result", "Finalizing the canonical mitigation result")
 	out.RequestID = run.RequestID
 	out.RequestSHA256 = run.RequestDigest
 	if len(req.UpstreamInputs) > 0 {
@@ -317,6 +318,7 @@ func executeDurableRun(ctx context.Context, run DurableRun) (RunOutcome, error) 
 	if err := setCanonicalIntegrity(&out); err != nil {
 		return RunOutcome{}, err
 	}
+	reportExecutionProgress(ctx, "result-prepared", "Canonical mitigation result is prepared for publication")
 	return out, nil
 }
 

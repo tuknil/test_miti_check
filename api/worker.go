@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+const lifecycleOperationTimeout = 5 * time.Second
+
 type DurableExecutor func(context.Context, DurableRun) (RunOutcome, error)
 type ResultPublisher interface {
 	Publish(context.Context, RunOutcome, []byte) error
@@ -82,7 +84,9 @@ func (w *RunWorker) Run(ctx context.Context) {
 func (w *RunWorker) executeOne(parent context.Context, run DurableRun) {
 	executionCtx, cancelExecution := context.WithCancel(parent)
 	executionCtx = withExecutionProgressReporter(executionCtx, func(ctx context.Context, phase, message string) error {
-		written, err := w.store.UpdateProgress(ctx, run.RunID, w.workerID, run.LeaseToken, phase, message)
+		operationCtx, cancel := context.WithTimeout(ctx, lifecycleOperationTimeout)
+		defer cancel()
+		written, err := w.store.UpdateProgress(operationCtx, run.RunID, w.workerID, run.LeaseToken, phase, message)
 		if err != nil {
 			return err
 		}
@@ -115,7 +119,9 @@ func (w *RunWorker) executeOne(parent context.Context, run DurableRun) {
 			case <-heartbeatCtx.Done():
 				return
 			case <-ticker.C:
-				requested, owned, err := w.store.Heartbeat(parent, run.RunID, w.workerID, run.LeaseToken, w.lease)
+				operationCtx, cancel := context.WithTimeout(parent, lifecycleOperationTimeout)
+				requested, owned, err := w.store.Heartbeat(operationCtx, run.RunID, w.workerID, run.LeaseToken, w.lease)
+				cancel()
 				if err != nil {
 					logLifecycle("lease_heartbeat_failed", run, map[string]any{"error": err.Error()})
 					if time.Since(time.Unix(0, lastHeartbeat.Load())) >= w.lease {
@@ -157,7 +163,9 @@ func (w *RunWorker) executeOne(parent context.Context, run DurableRun) {
 			outcome, err = w.execute(executionCtx, run)
 		}()
 	}
-	requested, owned, heartbeatErr := w.store.Heartbeat(parent, run.RunID, w.workerID, run.LeaseToken, w.lease)
+	operationCtx, cancelHeartbeat := context.WithTimeout(parent, lifecycleOperationTimeout)
+	requested, owned, heartbeatErr := w.store.Heartbeat(operationCtx, run.RunID, w.workerID, run.LeaseToken, w.lease)
+	cancelHeartbeat()
 	if heartbeatErr != nil || !owned {
 		leaseLost.Store(true)
 	}
