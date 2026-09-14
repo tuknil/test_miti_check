@@ -165,13 +165,14 @@ func resignCG(t *testing.T, cg map[string]any) {
 
 func preparedArchitectureWAF(t *testing.T) (sharedCandidateBundle, sharedPreparedWAF) {
 	t.Helper()
+	_, semantics := loadSharedSemantics(t)
 	bundleBytes := loadSharedFixture(t, "waf-atomic-v2.candidate-bundle.json")
 	var bundle sharedCandidateBundle
 	if err := json.Unmarshal(bundleBytes, &bundle); err != nil {
 		t.Fatal(err)
 	}
 	contents := map[string][]byte{"artifact-main": loadSharedFixture(t, "waf-rule-main.json"), "artifact-carriers": loadSharedFixture(t, "waf-rule-carriers.json")}
-	waf, applied, err := prepareSharedWAF(bundle, contents)
+	waf, applied, err := prepareSharedWAF(bundle, contents, semantics)
 	if err != nil {
 		t.Fatalf("prepare complete application unit: %v", err)
 	}
@@ -206,12 +207,12 @@ func TestCompleteApplicationUnitExecutesEveryRequiredAssignment(t *testing.T) {
 func TestApplicationUnitRejectsOmittedAndInventedArtifacts(t *testing.T) {
 	bundle, _ := preparedArchitectureWAF(t)
 	contents := map[string][]byte{"artifact-main": loadSharedFixture(t, "waf-rule-main.json")}
-	if _, _, err := prepareSharedWAF(bundle, contents); err == nil {
+	if _, _, err := prepareSharedWAF(bundle, contents, sharedSemantics{}); err == nil {
 		t.Fatal("omitted supporting artifact accepted")
 	}
 	contents["artifact-carriers"] = loadSharedFixture(t, "waf-rule-carriers.json")
 	contents["invented"] = []byte(`{}`)
-	if _, _, err := prepareSharedWAF(bundle, contents); err == nil {
+	if _, _, err := prepareSharedWAF(bundle, contents, sharedSemantics{}); err == nil {
 		t.Fatal("invented artifact accepted")
 	}
 }
@@ -381,11 +382,30 @@ func TestHTTPAssignmentsPreserveNamedHeaderCookieMethodAndBodyStates(t *testing.
 	}
 	request := sharedHTTPInput{Method: "PATCH", Headers: []sharedHTTPField{{Name: "X-Exact-Name", Value: "header-value"}}, Cookies: []sharedHTTPField{{Name: "session", Value: "cookie-value"}}, Body: present}
 	for _, candidate := range []sharedPreparedRule{rule("h", "header", "x-exact-name", "^header-value$"), rule("c", "cookie", "session", "^cookie-value$"), rule("m", "method", "", "^PATCH$"), rule("b", "body", "", "attack")} {
-		waf := sharedPreparedWAF{rules: map[string]sharedPreparedRule{"component": candidate}, alternatives: [][]string{{"component"}}}
-		matched, _, err := waf.evaluate(request, bodyBytes)
+		waf := sharedPreparedWAF{rules: map[string]sharedPreparedRule{"component": candidate}, alternatives: []sharedPreparedAlternative{{ComponentIDs: []string{"component"}}}}
+		matched, _, err := waf.evaluate(sharedRouteBinding{}, request, bodyBytes)
 		if err != nil || !matched {
 			t.Fatalf("carrier %s matched=%v err=%v", candidate.Carrier, matched, err)
 		}
+	}
+}
+
+func TestRouteBoundWAFDoesNotApplyPayloadRuleOnAnotherRoute(t *testing.T) {
+	rule := sharedPreparedRule{ID: "body-rule", Carrier: "body", Pattern: regexpMust(t, "attack")}
+	bound := sharedRouteBinding{Kind: "opaque-path-key", Method: "POST", PathKey: "public/submit.php"}
+	waf := sharedPreparedWAF{
+		rules:        map[string]sharedPreparedRule{"component": rule},
+		alternatives: []sharedPreparedAlternative{{ComponentIDs: []string{"component"}, Route: &bound}},
+	}
+	request := sharedHTTPInput{Method: "POST"}
+	matched, _, err := waf.evaluate(bound, request, []byte("attack"))
+	if err != nil || !matched {
+		t.Fatalf("bound route matched=%v err=%v", matched, err)
+	}
+	unrelated := sharedRouteBinding{Kind: "opaque-path-key", Method: "POST", PathKey: "inventory-item-detail"}
+	matched, _, err = waf.evaluate(unrelated, request, []byte("attack"))
+	if err != nil || matched {
+		t.Fatalf("unrelated route matched=%v err=%v", matched, err)
 	}
 }
 

@@ -1025,7 +1025,7 @@ func executeSharedContractV2(ctx context.Context, req SubmitMitigationCheckReque
 		return couldNotTest(out, "shared-contract verification failed: "+err.Error())
 	}
 	reportExecutionProgress(ctx, "preparing-application-unit", "Preparing the atomic WAF application unit")
-	waf, applied, err := prepareSharedWAF(resolved.Bundle, resolved.ArtifactBytes)
+	waf, applied, err := prepareSharedWAF(resolved.Bundle, resolved.ArtifactBytes, resolved.Semantics)
 	if err != nil {
 		return couldNotTest(out, "atomic application unit rejected: "+err.Error())
 	}
@@ -1169,7 +1169,7 @@ func validateSharedOutcomeAccounting(semantics sharedSemantics, results []Obliga
 
 type sharedPreparedWAF struct {
 	rules        map[string]sharedPreparedRule
-	alternatives [][]string
+	alternatives []sharedPreparedAlternative
 }
 type sharedPreparedRule struct {
 	ID, Carrier, Name string
@@ -1178,10 +1178,34 @@ type sharedPreparedRule struct {
 }
 
 type sharedRuleDocument struct {
-	RuleSetID            string                 `json:"rule_set_id"`
-	Action               string                 `json:"action"`
-	CoverageAlternatives [][]string             `json:"coverage_alternatives"`
-	Rules                []sharedRuleDefinition `json:"rules"`
+	RuleSetID            string                   `json:"rule_set_id"`
+	Action               string                   `json:"action"`
+	PlacementMode        string                   `json:"placement_mode,omitempty"`
+	CoverageAlternatives [][]string               `json:"coverage_alternatives"`
+	RouteAlternatives    []sharedRouteAlternative `json:"route_bound_alternatives,omitempty"`
+	Rules                []sharedRuleDefinition   `json:"rules"`
+}
+type sharedPreparedAlternative struct {
+	ComponentIDs []string
+	Route        *sharedRouteBinding
+}
+type sharedRouteAlternative struct {
+	AlternativeID     string                        `json:"alternative_id"`
+	ComponentIDs      []string                      `json:"component_ids"`
+	ComponentBindings []sharedRouteComponentBinding `json:"component_bindings"`
+	Route             sharedRouteBinding            `json:"route"`
+}
+type sharedRouteComponentBinding struct {
+	ComponentID string           `json:"component_id"`
+	InputRefs   []sharedTypedRef `json:"input_refs"`
+}
+type sharedRouteBinding struct {
+	Kind      string `json:"kind"`
+	Method    string `json:"method"`
+	PathKey   string `json:"path_key,omitempty"`
+	Scheme    string `json:"scheme,omitempty"`
+	Authority string `json:"authority,omitempty"`
+	Path      string `json:"path,omitempty"`
 }
 type sharedRuleDefinition struct {
 	RuleID          string   `json:"rule_id"`
@@ -1202,7 +1226,7 @@ type sharedCarrierBinding struct {
 	Name        string `json:"name"`
 }
 
-func prepareSharedWAF(bundle sharedCandidateBundle, contents map[string][]byte) (sharedPreparedWAF, AppliedApplicationUnit, error) {
+func prepareSharedWAF(bundle sharedCandidateBundle, contents map[string][]byte, semantics sharedSemantics) (sharedPreparedWAF, AppliedApplicationUnit, error) {
 	if len(bundle.ApplicationUnit.ArtifactRefs) != len(contents) {
 		return sharedPreparedWAF{}, AppliedApplicationUnit{}, errors.New("application unit/content count differs")
 	}
@@ -1237,7 +1261,7 @@ func prepareSharedWAF(bundle sharedCandidateBundle, contents map[string][]byte) 
 		}
 		bindings[key] = key
 	}
-	prepared := sharedPreparedWAF{rules: map[string]sharedPreparedRule{}, alternatives: main.CoverageAlternatives}
+	prepared := sharedPreparedWAF{rules: map[string]sharedPreparedRule{}}
 	for _, rule := range main.Rules {
 		key := rule.ComponentID + "\x00" + rule.Carrier + "\x00" + strings.ToLower(rule.Name)
 		if bindings[key] == "" || prepared.rules[rule.ComponentID].ID != "" {
@@ -1267,16 +1291,82 @@ func prepareSharedWAF(bundle sharedCandidateBundle, contents map[string][]byte) 
 		}
 		prepared.rules[rule.ComponentID] = sharedPreparedRule{rule.RuleID, rule.Carrier, rule.Name, compiled, rule.Transformations}
 	}
+	if main.PlacementMode == "route-bound-v1" {
+		if len(main.RouteAlternatives) == 0 {
+			return sharedPreparedWAF{}, AppliedApplicationUnit{}, errors.New("route-bound placement has no alternatives")
+		}
+		coverage := map[string]bool{}
+		for _, alternative := range main.CoverageAlternatives {
+			coverage[strings.Join(alternative, "\x00")] = true
+		}
+		seen := map[string]bool{}
+		representedCoverage := map[string]bool{}
+		semanticInputs := map[string]sharedRouteBinding{}
+		for _, input := range semantics.TestInputs {
+			if route, ok := sharedInputRoute(input.Input); ok {
+				semanticInputs[input.InputID] = route
+			}
+		}
+		semanticComponents := map[string][]sharedTypedRef{}
+		for _, component := range semantics.Components {
+			componentID := stringValue(component["component_id"])
+			encoded, _ := json.Marshal(component["input_refs"])
+			var refs []sharedTypedRef
+			if componentID == "" || json.Unmarshal(encoded, &refs) != nil {
+				return sharedPreparedWAF{}, AppliedApplicationUnit{}, errors.New("authenticated component input ancestry is invalid")
+			}
+			semanticComponents[componentID] = refs
+		}
+		for _, alternative := range main.RouteAlternatives {
+			if alternative.AlternativeID == "" || seen[alternative.AlternativeID] || !coverage[strings.Join(alternative.ComponentIDs, "\x00")] || !validSharedRouteBinding(alternative.Route) {
+				return sharedPreparedWAF{}, AppliedApplicationUnit{}, errors.New("route-bound alternative is invalid")
+			}
+			seen[alternative.AlternativeID] = true
+			representedCoverage[strings.Join(alternative.ComponentIDs, "\x00")] = true
+			bindings := map[string][]sharedTypedRef{}
+			for _, binding := range alternative.ComponentBindings {
+				if binding.ComponentID == "" || bindings[binding.ComponentID] != nil {
+					return sharedPreparedWAF{}, AppliedApplicationUnit{}, errors.New("route component binding is duplicated")
+				}
+				bindings[binding.ComponentID] = binding.InputRefs
+			}
+			if len(bindings) != len(alternative.ComponentIDs) {
+				return sharedPreparedWAF{}, AppliedApplicationUnit{}, errors.New("route component binding set is incomplete")
+			}
+			for _, componentID := range alternative.ComponentIDs {
+				expected := []sharedTypedRef{}
+				for _, ref := range semanticComponents[componentID] {
+					if route, ok := semanticInputs[ref.ID]; ok && route == alternative.Route {
+						expected = append(expected, ref)
+					}
+				}
+				if !sameSharedTypedRefs(bindings[componentID], expected) || len(expected) == 0 {
+					return sharedPreparedWAF{}, AppliedApplicationUnit{}, errors.New("route binding differs from authenticated CG input ancestry")
+				}
+			}
+			route := alternative.Route
+			prepared.alternatives = append(prepared.alternatives, sharedPreparedAlternative{append([]string{}, alternative.ComponentIDs...), &route})
+		}
+		if len(representedCoverage) != len(coverage) {
+			return sharedPreparedWAF{}, AppliedApplicationUnit{}, errors.New("route-bound alternatives do not cover every Boolean alternative")
+		}
+	} else if main.PlacementMode == "" {
+		for _, alternative := range main.CoverageAlternatives {
+			prepared.alternatives = append(prepared.alternatives, sharedPreparedAlternative{ComponentIDs: append([]string{}, alternative...)})
+		}
+	} else {
+		return sharedPreparedWAF{}, AppliedApplicationUnit{}, errors.New("unknown WAF placement mode")
+	}
 	if len(prepared.alternatives) == 0 {
 		for _, rule := range main.Rules {
-			prepared.alternatives = append(prepared.alternatives, []string{rule.ComponentID})
+			prepared.alternatives = append(prepared.alternatives, sharedPreparedAlternative{ComponentIDs: []string{rule.ComponentID}})
 		}
 	}
 	for _, alternative := range prepared.alternatives {
-		if len(alternative) == 0 {
+		if len(alternative.ComponentIDs) == 0 {
 			return sharedPreparedWAF{}, AppliedApplicationUnit{}, errors.New("empty coverage alternative")
 		}
-		for _, id := range alternative {
+		for _, id := range alternative.ComponentIDs {
 			if prepared.rules[id].ID == "" {
 				return sharedPreparedWAF{}, AppliedApplicationUnit{}, errors.New("coverage alternative references unknown rule")
 			}
@@ -1316,7 +1406,9 @@ func executeSharedCase(ctx context.Context, base string, input sharedTestInput, 
 		result.Evidence = &CaseEvidence{Detail: err.Error()}
 		return result
 	}
+	route := sharedRouteBinding{Kind: "rendered-http-route", Method: request.Method, Scheme: request.Scheme, Authority: request.Authority, Path: request.Path}
 	if modality == "http-request-template" {
+		route = sharedRouteBinding{Kind: "opaque-path-key", Method: request.Method, PathKey: request.PathKey}
 		resolution, err := resolveSharedTemplate(input.InputID, request, profileID)
 		if err != nil {
 			result.Disposition = "safety-stop"
@@ -1332,7 +1424,7 @@ func executeSharedCase(ctx context.Context, base string, input sharedTestInput, 
 		result.Evidence = &CaseEvidence{Detail: err.Error()}
 		return result
 	}
-	matched, ruleID, err := waf.evaluate(request, body)
+	matched, ruleID, err := waf.evaluate(route, request, body)
 	if err != nil {
 		result.Disposition = "safety-stop"
 		result.Evidence = &CaseEvidence{Detail: err.Error()}
@@ -1481,11 +1573,60 @@ func resolveSharedJSONPointer(root any, pointer string) (any, error) {
 	return current, nil
 }
 
-func (w sharedPreparedWAF) evaluate(request sharedHTTPInput, body []byte) (bool, string, error) {
+func validSharedRouteBinding(route sharedRouteBinding) bool {
+	if route.Method == "" {
+		return false
+	}
+	if route.Kind == "opaque-path-key" {
+		return route.PathKey != "" && route.Path == "" && route.Scheme == "" && route.Authority == ""
+	}
+	return route.Kind == "rendered-http-route" && route.Path != "" && route.PathKey == ""
+}
+
+func sharedInputRoute(input map[string]any) (sharedRouteBinding, bool) {
+	modality := stringValue(input["modality"])
+	method := stringValue(input["method"])
+	if modality == "http-request-template" {
+		route := sharedRouteBinding{Kind: "opaque-path-key", Method: method, PathKey: stringValue(input["path_key"])}
+		return route, validSharedRouteBinding(route)
+	}
+	if modality == "http-request" {
+		route := sharedRouteBinding{Kind: "rendered-http-route", Method: method, Scheme: stringValue(input["scheme"]), Authority: stringValue(input["authority"]), Path: stringValue(input["path"])}
+		return route, validSharedRouteBinding(route)
+	}
+	return sharedRouteBinding{}, false
+}
+
+func sameSharedTypedRefs(left, right []sharedTypedRef) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func sharedRouteApplies(bound, actual sharedRouteBinding) bool {
+	if bound.Kind != actual.Kind || bound.Method != actual.Method {
+		return false
+	}
+	if bound.Kind == "opaque-path-key" {
+		return bound.PathKey == actual.PathKey
+	}
+	return bound.Scheme == actual.Scheme && bound.Authority == actual.Authority && bound.Path == actual.Path
+}
+
+func (w sharedPreparedWAF) evaluate(route sharedRouteBinding, request sharedHTTPInput, body []byte) (bool, string, error) {
 	for _, alternative := range w.alternatives {
+		if alternative.Route != nil && !sharedRouteApplies(*alternative.Route, route) {
+			continue
+		}
 		matched := true
 		last := ""
-		for _, id := range alternative {
+		for _, id := range alternative.ComponentIDs {
 			rule := w.rules[id]
 			values := sharedCarrierValues(rule, request, body)
 			ruleMatched := false
