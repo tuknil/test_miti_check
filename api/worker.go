@@ -163,15 +163,6 @@ func (w *RunWorker) executeOne(parent context.Context, run DurableRun) {
 			outcome, err = w.execute(executionCtx, run)
 		}()
 	}
-	operationCtx, cancelHeartbeat := context.WithTimeout(parent, lifecycleOperationTimeout)
-	requested, owned, heartbeatErr := w.store.Heartbeat(operationCtx, run.RunID, w.workerID, run.LeaseToken, w.lease)
-	cancelHeartbeat()
-	if heartbeatErr != nil || !owned {
-		leaseLost.Store(true)
-	}
-	if requested {
-		cancellationRequested.Store(true)
-	}
 	if cancellationRequested.Load() && !run.PublicationPending {
 		written, markErr := w.store.MarkCanceled(parent, run.RunID, w.workerID, run.LeaseToken)
 		if markErr != nil {
@@ -202,6 +193,9 @@ func (w *RunWorker) executeOne(parent context.Context, run DurableRun) {
 		return
 	}
 	if run.Result == nil {
+		// StageOutcome is the authoritative lease, ownership, cancellation, and
+		// empty-result fence. A separate heartbeat precheck creates a TOCTOU gap
+		// and can discard a fully prepared result before this atomic transition.
 		payload, err = canonicalResultPayload(outcome)
 		if err != nil {
 			logLifecycle("result_encoding_failed", run, map[string]any{"error": err.Error()})
