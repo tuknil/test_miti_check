@@ -622,6 +622,16 @@ func validateCanonicalResultPayload(out RunOutcome, payload []byte) error {
 	if err != nil {
 		return err
 	}
+	if decoded.ProfileID != "" {
+		var document any
+		if err := decodeJSONAny(canonicalUnsigned, &document); err != nil {
+			return fmt.Errorf("decode shared-profile canonical result: %w", err)
+		}
+		canonicalUnsigned, err = marshalRFC8785(document)
+		if err != nil {
+			return fmt.Errorf("canonicalize shared-profile result: %w", err)
+		}
+	}
 	sum := sha256.Sum256(canonicalUnsigned)
 	wantDigest := "sha256:" + hex.EncodeToString(sum[:])
 	if decoded.ContentSHA256 != wantDigest || decoded.SizeBytes != int64(len(canonicalUnsigned)) {
