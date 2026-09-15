@@ -13,9 +13,9 @@ RUN --mount=type=secret,id=go_proxy,required=true \
     CGO_ENABLED=0 GOOS=linux go build -o /out/api .
 
 # Runtime image. Includes the docker CLI because the worker launches the
-# validation-substrate container on the host daemon (mounted docker.sock).
-# Runs as root so it can reach the root-owned docker socket; Postgres now lives
-# in its own container, so there is no non-root requirement here.
+# validation-substrate container on the host daemon (mounted docker.sock), and
+# runs as root so it can reach the root-owned docker socket. The run ledger uses
+# a container/remote Postgres via DATABASE_URL — nothing runs a database here.
 FROM artifact.it.att.com/docker-hub/debian:bookworm-slim
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \

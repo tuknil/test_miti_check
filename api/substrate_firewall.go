@@ -87,7 +87,9 @@ func runFirewallInMemory(ctx context.Context, req SubmitMitigationCheckRequest, 
 		out.Steps = append(out.Steps, "no deny match -> connection allowed")
 	}
 
-	out.Match = out.Actual.Blocked == out.Expected.Blocked
+	// A match requires an actual block: a not-blocked connection never counts as a
+	// match regardless of the expected outcome; when blocked it must still agree.
+	out.Match = out.Actual.Blocked && (out.Actual.Blocked == out.Expected.Blocked)
 	verdict := "BLOCKED"
 	if !out.Actual.Blocked {
 		verdict = "ALLOWED"
