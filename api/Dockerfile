@@ -6,12 +6,23 @@ ENV GONOSUMDB=off \
 WORKDIR /src
 COPY go.mod go.sum ./
 COPY third_party/jsonschema ./third_party/jsonschema
-RUN --mount=type=secret,id=go_proxy,required=true \
-    GOPROXY="$(cat /run/secrets/go_proxy)" go mod download
+RUN --mount=type=secret,id=go_proxy,required=false \
+    --mount=type=secret,id=jfrog_username,required=false \
+    --mount=type=secret,id=jfrog_access_token,required=false \
+    set -eu; \
+    if [ -s /run/secrets/go_proxy ]; then \
+        export GOPROXY="$(cat /run/secrets/go_proxy)"; \
+    elif [ -s /run/secrets/jfrog_username ] && [ -s /run/secrets/jfrog_access_token ]; then \
+        printf 'machine artifact.it.att.com login %s password %s\n' "$(cat /run/secrets/jfrog_username)" "$(cat /run/secrets/jfrog_access_token)" > /root/.netrc; \
+        chmod 0600 /root/.netrc; \
+        export GOPROXY='https://artifact.it.att.com/artifactory/api/go/apm0047460-go-group'; \
+    else \
+        echo 'approved Go proxy credentials are required' >&2; exit 1; \
+    fi; \
+    go mod download; \
+    rm -f /root/.netrc
 COPY . .
-RUN --mount=type=secret,id=go_proxy,required=true \
-    GOPROXY="$(cat /run/secrets/go_proxy)" \
-    CGO_ENABLED=0 GOOS=linux go build -o /out/api .
+RUN CGO_ENABLED=0 GOOS=linux go build -o /out/api .
 
 # Runtime image. Includes the docker CLI because the worker launches the
 # validation-substrate container on the host daemon (mounted docker.sock), and
