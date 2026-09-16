@@ -388,6 +388,20 @@ func (s *RunStore) Heartbeat(ctx context.Context, id, workerID, leaseToken strin
 	return cancel, err == nil, err
 }
 
+// UpdateProgress records diagnostic execution state without extending the
+// lease. Worker identity and lease fencing prevent stale attempts from
+// overwriting the active attempt's status.
+func (s *RunStore) UpdateProgress(ctx context.Context, id, workerID, leaseToken, phase, message string) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `UPDATE mitigation_check_run SET progress_phase=$4,
+		progress_message=$5,updated_at=now() WHERE run_id=$1 AND worker_id=$2 AND lease_token=$3
+		AND status='running' AND lease_expires_at>now()`, id, workerID, leaseToken, phase, message)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n == 1, nil
+}
+
 func (s *RunStore) StageOutcome(ctx context.Context, id, workerID, leaseToken string, out RunOutcome, payload []byte) (bool, error) {
 	if err := validateCanonicalResultPayload(out, payload); err != nil {
 		return false, err
@@ -607,6 +621,16 @@ func validateCanonicalResultPayload(out RunOutcome, payload []byte) error {
 	canonicalUnsigned, err := json.Marshal(unsigned)
 	if err != nil {
 		return err
+	}
+	if decoded.ProfileID != "" {
+		var document any
+		if err := decodeJSONAny(canonicalUnsigned, &document); err != nil {
+			return fmt.Errorf("decode shared-profile canonical result: %w", err)
+		}
+		canonicalUnsigned, err = marshalRFC8785(document)
+		if err != nil {
+			return fmt.Errorf("canonicalize shared-profile result: %w", err)
+		}
 	}
 	sum := sha256.Sum256(canonicalUnsigned)
 	wantDigest := "sha256:" + hex.EncodeToString(sum[:])

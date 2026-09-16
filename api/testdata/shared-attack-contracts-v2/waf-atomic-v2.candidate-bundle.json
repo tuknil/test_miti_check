@@ -1,0 +1,419 @@
+{
+  "contract_id": "candidate-bundle@1.0",
+  "bundle_id": "bundle-waf-42",
+  "bundle_revision": 1,
+  "bundle_digest": "sha256:985085ddc5576e1f84d0493757e182ef1cef7890785e0659e7d22ae219fcecaa",
+  "digest_profile": "rfc8785-sha256-exclude-bundle_digest-and-candidate_digest-v1",
+  "produced_at": "2026-09-11T12:10:00Z",
+  "semantics_binding": {
+    "contract_id": "attack-match-semantics@2.0",
+    "semantics_id": "ams-composite-42",
+    "semantics_revision": 1,
+    "semantics_digest": "sha256:25ceed207a3aaab07d98606635bf0cc42f815570c8b9b6709d6bd11f5c80fe06",
+    "locator": {
+      "uri": "../fixtures/check-generation-complete-result.json",
+      "digest": "sha256:26e9bf585d55c77b53b2846a0d7246f7dda17297756c9ccfb75a0572792a71dc",
+      "media_type": "application/json",
+      "byte_length": 41368,
+      "immutable": true
+    }
+  },
+  "primary_candidate": {
+    "candidate_id": "candidate-waf-42",
+    "candidate_revision": 1,
+    "candidate_digest": "sha256:b328a437c2b72188245f03667840985f6a23bed838ad1d1681f70f9017b37004",
+    "selected_control_class": "waf",
+    "intent": "Block the grounded encoded discriminator in each supported HTTP carrier without changing unrelated traffic.",
+    "artifacts": [
+      {
+        "artifact_id": "artifact-main",
+        "order": 0,
+        "role": "primary",
+        "kind": "match-rule",
+        "content": {
+          "uri": "../fixtures/waf-rule-main.json",
+          "digest": "sha256:c5278463d9da91304ed51df14bee187662e725b47d4f29a4a9162ddb510e6453",
+          "media_type": "application/json",
+          "byte_length": 1333,
+          "immutable": true
+        },
+        "application_group_ref": {
+          "kind": "atomic-group",
+          "scope": "bundle-waf-42",
+          "id": "atomic-waf-rules"
+        },
+        "depends_on": []
+      },
+      {
+        "artifact_id": "artifact-carriers",
+        "order": 1,
+        "role": "supporting",
+        "kind": "configuration-fragment",
+        "content": {
+          "uri": "../fixtures/waf-rule-carriers.json",
+          "digest": "sha256:4ceb2071f42b5b7bc4cf449b5929055c9d73b12d9fbda792e9a22a8b9d5c7e64",
+          "media_type": "application/json",
+          "byte_length": 577,
+          "immutable": true
+        },
+        "application_group_ref": {
+          "kind": "atomic-group",
+          "scope": "bundle-waf-42",
+          "id": "atomic-waf-rules"
+        },
+        "depends_on": [
+          {
+            "kind": "artifact",
+            "scope": "bundle-waf-42",
+            "id": "artifact-main"
+          }
+        ]
+      }
+    ],
+    "directives": [
+      {
+        "directive_id": "directive-main-placement",
+        "kind": "placement",
+        "artifact_ref": {
+          "kind": "artifact",
+          "scope": "bundle-waf-42",
+          "id": "artifact-main"
+        },
+        "value": "Evaluate before generic application allow rules.",
+        "required": true
+      },
+      {
+        "directive_id": "directive-carrier-attach",
+        "kind": "ordering",
+        "artifact_ref": {
+          "kind": "artifact",
+          "scope": "bundle-waf-42",
+          "id": "artifact-carriers"
+        },
+        "value": "Attach carrier configuration in the same transaction as the match rule.",
+        "required": true
+      }
+    ],
+    "obligation_mappings": [
+      {
+        "obligation_id": "obligation-root",
+        "semantics_refs": [
+          {
+            "kind": "coverage-group",
+            "scope": "ams-composite-42",
+            "id": "coverage-root"
+          }
+        ],
+        "source_member_refs": [
+          {
+            "kind": "source-member",
+            "scope": "ams-composite-42",
+            "id": "member-protocol"
+          },
+          {
+            "kind": "source-member",
+            "scope": "ams-composite-42",
+            "id": "member-authority"
+          },
+          {
+            "kind": "source-member",
+            "scope": "ams-composite-42",
+            "id": "member-resource"
+          },
+          {
+            "kind": "source-member",
+            "scope": "ams-composite-42",
+            "id": "member-query"
+          },
+          {
+            "kind": "source-member",
+            "scope": "ams-composite-42",
+            "id": "member-header"
+          },
+          {
+            "kind": "source-member",
+            "scope": "ams-composite-42",
+            "id": "member-cookie"
+          }
+        ],
+        "artifact_refs": [
+          {
+            "kind": "artifact",
+            "scope": "bundle-waf-42",
+            "id": "artifact-main"
+          },
+          {
+            "kind": "artifact",
+            "scope": "bundle-waf-42",
+            "id": "artifact-carriers"
+          }
+        ],
+        "directive_refs": [
+          {
+            "kind": "directive",
+            "scope": "bundle-waf-42",
+            "id": "directive-main-placement"
+          },
+          {
+            "kind": "directive",
+            "scope": "bundle-waf-42",
+            "id": "directive-carrier-attach"
+          }
+        ],
+        "coverage": "exact"
+      },
+      {
+        "obligation_id": "obligation-url",
+        "semantics_refs": [
+          {
+            "kind": "component",
+            "scope": "ams-composite-42",
+            "id": "component-url"
+          }
+        ],
+        "source_member_refs": [
+          {
+            "kind": "source-member",
+            "scope": "ams-composite-42",
+            "id": "member-protocol"
+          },
+          {
+            "kind": "source-member",
+            "scope": "ams-composite-42",
+            "id": "member-authority"
+          },
+          {
+            "kind": "source-member",
+            "scope": "ams-composite-42",
+            "id": "member-resource"
+          }
+        ],
+        "artifact_refs": [
+          {
+            "kind": "artifact",
+            "scope": "bundle-waf-42",
+            "id": "artifact-main"
+          }
+        ],
+        "directive_refs": [
+          {
+            "kind": "directive",
+            "scope": "bundle-waf-42",
+            "id": "directive-main-placement"
+          }
+        ],
+        "coverage": "exact"
+      },
+      {
+        "obligation_id": "obligation-carriers",
+        "semantics_refs": [
+          {
+            "kind": "coverage-group",
+            "scope": "ams-composite-42",
+            "id": "coverage-carriers"
+          }
+        ],
+        "source_member_refs": [
+          {
+            "kind": "source-member",
+            "scope": "ams-composite-42",
+            "id": "member-query"
+          },
+          {
+            "kind": "source-member",
+            "scope": "ams-composite-42",
+            "id": "member-header"
+          },
+          {
+            "kind": "source-member",
+            "scope": "ams-composite-42",
+            "id": "member-cookie"
+          }
+        ],
+        "artifact_refs": [
+          {
+            "kind": "artifact",
+            "scope": "bundle-waf-42",
+            "id": "artifact-main"
+          },
+          {
+            "kind": "artifact",
+            "scope": "bundle-waf-42",
+            "id": "artifact-carriers"
+          }
+        ],
+        "directive_refs": [
+          {
+            "kind": "directive",
+            "scope": "bundle-waf-42",
+            "id": "directive-carrier-attach"
+          }
+        ],
+        "coverage": "exact"
+      },
+      {
+        "obligation_id": "obligation-query",
+        "semantics_refs": [
+          {
+            "kind": "component",
+            "scope": "ams-composite-42",
+            "id": "component-query"
+          }
+        ],
+        "source_member_refs": [
+          {
+            "kind": "source-member",
+            "scope": "ams-composite-42",
+            "id": "member-query"
+          }
+        ],
+        "artifact_refs": [
+          {
+            "kind": "artifact",
+            "scope": "bundle-waf-42",
+            "id": "artifact-main"
+          }
+        ],
+        "directive_refs": [
+          {
+            "kind": "directive",
+            "scope": "bundle-waf-42",
+            "id": "directive-main-placement"
+          }
+        ],
+        "coverage": "exact"
+      },
+      {
+        "obligation_id": "obligation-header",
+        "semantics_refs": [
+          {
+            "kind": "component",
+            "scope": "ams-composite-42",
+            "id": "component-header"
+          }
+        ],
+        "source_member_refs": [
+          {
+            "kind": "source-member",
+            "scope": "ams-composite-42",
+            "id": "member-header"
+          }
+        ],
+        "artifact_refs": [
+          {
+            "kind": "artifact",
+            "scope": "bundle-waf-42",
+            "id": "artifact-main"
+          },
+          {
+            "kind": "artifact",
+            "scope": "bundle-waf-42",
+            "id": "artifact-carriers"
+          }
+        ],
+        "directive_refs": [
+          {
+            "kind": "directive",
+            "scope": "bundle-waf-42",
+            "id": "directive-carrier-attach"
+          }
+        ],
+        "coverage": "exact"
+      },
+      {
+        "obligation_id": "obligation-cookie",
+        "semantics_refs": [
+          {
+            "kind": "component",
+            "scope": "ams-composite-42",
+            "id": "component-cookie"
+          }
+        ],
+        "source_member_refs": [
+          {
+            "kind": "source-member",
+            "scope": "ams-composite-42",
+            "id": "member-cookie"
+          }
+        ],
+        "artifact_refs": [
+          {
+            "kind": "artifact",
+            "scope": "bundle-waf-42",
+            "id": "artifact-main"
+          },
+          {
+            "kind": "artifact",
+            "scope": "bundle-waf-42",
+            "id": "artifact-carriers"
+          }
+        ],
+        "directive_refs": [
+          {
+            "kind": "directive",
+            "scope": "bundle-waf-42",
+            "id": "directive-carrier-attach"
+          }
+        ],
+        "coverage": "exact"
+      }
+    ],
+    "assumptions": [],
+    "limitations": []
+  },
+  "application_unit": {
+    "application_unit_id": "application-unit-waf-42",
+    "artifact_refs": [
+      {
+        "kind": "artifact",
+        "scope": "bundle-waf-42",
+        "id": "artifact-main"
+      },
+      {
+        "kind": "artifact",
+        "scope": "bundle-waf-42",
+        "id": "artifact-carriers"
+      }
+    ],
+    "apply": "all-or-nothing",
+    "rollback": "all-or-nothing",
+    "remove": "all-or-nothing",
+    "readback": "verify-every-artifact-or-rollback"
+  },
+  "atomic_groups": [
+    {
+      "atomic_group_id": "atomic-waf-rules",
+      "artifact_refs": [
+        {
+          "kind": "artifact",
+          "scope": "bundle-waf-42",
+          "id": "artifact-main"
+        },
+        {
+          "kind": "artifact",
+          "scope": "bundle-waf-42",
+          "id": "artifact-carriers"
+        }
+      ],
+      "apply": "all-or-nothing",
+      "rollback": "all-or-nothing",
+      "remove": "all-or-nothing",
+      "readback": "verify-group-or-rollback"
+    }
+  ],
+  "provenance": [
+    {
+      "step_id": "compile-1",
+      "order": 0,
+      "source": "compiler",
+      "actor_identity": "janus-deterministic-candidate-assembler",
+      "actor_version": "1.0.0",
+      "actor_digest": "sha256:6caec931ace135d24e69f97e25358f701d82a414d11a59f760c1332fd8f9468b",
+      "input_digests": [
+        "sha256:9102351dfa0274854433b2d27f8b90c9badcba53dca2b95d1480a9ee57859c03"
+      ],
+      "output_digest": "sha256:6caec931ace135d24e69f97e25358f701d82a414d11a59f760c1332fd8f9468b"
+    }
+  ],
+  "limitations": []
+}

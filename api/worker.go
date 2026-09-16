@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+const lifecycleOperationTimeout = 5 * time.Second
+
 type DurableExecutor func(context.Context, DurableRun) (RunOutcome, error)
 type ResultPublisher interface {
 	Publish(context.Context, RunOutcome, []byte) error
@@ -16,6 +18,23 @@ type ResultPublisher interface {
 
 type ResultVerifier interface {
 	Verify(context.Context, RunOutcome, []byte) error
+}
+
+type executionProgressReporter func(context.Context, string, string) error
+type executionProgressContextKey struct{}
+
+func withExecutionProgressReporter(ctx context.Context, reporter executionProgressReporter) context.Context {
+	return context.WithValue(ctx, executionProgressContextKey{}, reporter)
+}
+
+func reportExecutionProgress(ctx context.Context, phase, message string) {
+	reporter, _ := ctx.Value(executionProgressContextKey{}).(executionProgressReporter)
+	if reporter == nil {
+		return
+	}
+	if err := reporter(ctx, phase, message); err != nil {
+		logLifecycle("progress_update_failed", DurableRun{}, map[string]any{"phase": phase, "error": err.Error()})
+	}
 }
 
 type RunWorker struct {
@@ -32,7 +51,7 @@ type RunWorker struct {
 
 func NewRunWorker(store *RunStore, execute DurableExecutor, publisher ResultPublisher) *RunWorker {
 	return &RunWorker{store: store, execute: execute, publisher: publisher,
-		workerID: "mc-worker-" + hostname() + "-" + newID(), lease: 30 * time.Second, poll: 500 * time.Millisecond, maxAttempts: 3,
+		workerID: "mc-worker-" + hostname() + "-" + newID(), lease: 10 * time.Minute, poll: 500 * time.Millisecond, maxAttempts: 3,
 		maxVerificationAttempts: 6, verificationBackoff: 5 * time.Second}
 }
 
@@ -64,6 +83,18 @@ func (w *RunWorker) Run(ctx context.Context) {
 
 func (w *RunWorker) executeOne(parent context.Context, run DurableRun) {
 	executionCtx, cancelExecution := context.WithCancel(parent)
+	executionCtx = withExecutionProgressReporter(executionCtx, func(ctx context.Context, phase, message string) error {
+		operationCtx, cancel := context.WithTimeout(ctx, lifecycleOperationTimeout)
+		defer cancel()
+		written, err := w.store.UpdateProgress(operationCtx, run.RunID, w.workerID, run.LeaseToken, phase, message)
+		if err != nil {
+			return err
+		}
+		if !written {
+			return fmt.Errorf("worker no longer owns the execution lease")
+		}
+		return nil
+	})
 	heartbeatCtx, stopHeartbeat := context.WithCancel(parent)
 	done := make(chan struct{})
 	defer func() {
@@ -73,8 +104,14 @@ func (w *RunWorker) executeOne(parent context.Context, run DurableRun) {
 	}()
 	var leaseLost atomic.Bool
 	var cancellationRequested atomic.Bool
+	var lastHeartbeat atomic.Int64
+	lastHeartbeat.Store(time.Now().UnixNano())
 	go func() {
-		ticker := time.NewTicker(w.lease / 3)
+		heartbeatInterval := w.lease / 3
+		if heartbeatInterval > 10*time.Second {
+			heartbeatInterval = 10 * time.Second
+		}
+		ticker := time.NewTicker(heartbeatInterval)
 		defer ticker.Stop()
 		defer close(done)
 		for {
@@ -82,12 +119,17 @@ func (w *RunWorker) executeOne(parent context.Context, run DurableRun) {
 			case <-heartbeatCtx.Done():
 				return
 			case <-ticker.C:
-				requested, owned, err := w.store.Heartbeat(parent, run.RunID, w.workerID, run.LeaseToken, w.lease)
+				operationCtx, cancel := context.WithTimeout(parent, lifecycleOperationTimeout)
+				requested, owned, err := w.store.Heartbeat(operationCtx, run.RunID, w.workerID, run.LeaseToken, w.lease)
+				cancel()
 				if err != nil {
-					leaseLost.Store(true)
 					logLifecycle("lease_heartbeat_failed", run, map[string]any{"error": err.Error()})
-					cancelExecution()
-					return
+					if time.Since(time.Unix(0, lastHeartbeat.Load())) >= w.lease {
+						leaseLost.Store(true)
+						cancelExecution()
+						return
+					}
+					continue
 				}
 				if !owned {
 					leaseLost.Store(true)
@@ -95,6 +137,7 @@ func (w *RunWorker) executeOne(parent context.Context, run DurableRun) {
 					cancelExecution()
 					return
 				}
+				lastHeartbeat.Store(time.Now().UnixNano())
 				if requested {
 					cancellationRequested.Store(true)
 					cancelExecution()
@@ -119,13 +162,6 @@ func (w *RunWorker) executeOne(parent context.Context, run DurableRun) {
 			}()
 			outcome, err = w.execute(executionCtx, run)
 		}()
-	}
-	requested, owned, heartbeatErr := w.store.Heartbeat(parent, run.RunID, w.workerID, run.LeaseToken, w.lease)
-	if heartbeatErr != nil || !owned {
-		leaseLost.Store(true)
-	}
-	if requested {
-		cancellationRequested.Store(true)
 	}
 	if cancellationRequested.Load() && !run.PublicationPending {
 		written, markErr := w.store.MarkCanceled(parent, run.RunID, w.workerID, run.LeaseToken)
@@ -157,6 +193,9 @@ func (w *RunWorker) executeOne(parent context.Context, run DurableRun) {
 		return
 	}
 	if run.Result == nil {
+		// StageOutcome is the authoritative lease, ownership, cancellation, and
+		// empty-result fence. A separate heartbeat precheck creates a TOCTOU gap
+		// and can discard a fully prepared result before this atomic transition.
 		payload, err = canonicalResultPayload(outcome)
 		if err != nil {
 			logLifecycle("result_encoding_failed", run, map[string]any{"error": err.Error()})
@@ -164,6 +203,16 @@ func (w *RunWorker) executeOne(parent context.Context, run DurableRun) {
 		}
 		staged, stageErr := w.store.StageOutcome(parent, run.RunID, w.workerID, run.LeaseToken, outcome, payload)
 		if stageErr != nil || !staged {
+			if stageErr == nil {
+				requested, owned, heartbeatErr := w.store.Heartbeat(parent, run.RunID, w.workerID, run.LeaseToken, w.lease)
+				if heartbeatErr == nil && owned && requested {
+					written, markErr := w.store.MarkCanceled(parent, run.RunID, w.workerID, run.LeaseToken)
+					logLifecycle("run_canceled_before_staging", run, map[string]any{
+						"transition_written": written, "transition_error": errorString(markErr),
+					})
+					return
+				}
+			}
 			detail := errorString(stageErr)
 			if detail == "" {
 				detail = "lease no longer owned"

@@ -5,6 +5,9 @@ info:
   description: >
     Fast block/pass proof capability for one candidate mitigation against one
     test basis in one bounded validation substrate (contract `mitigation-check@1.0`).
+    The additive `shared-attack-contracts-v2` route consumes compact immutable
+    Check Generation and Defense Generation locators plus an approved profile ID,
+    executes every required obligation/input assignment, and returns exact coverage accounting.
     Canonical submission is asynchronous and creates a durable PostgreSQL run
     before a leased worker executes the existing mitigation-check executor.
     Valid transitions are queued to running to a terminal state, queued to
@@ -258,9 +261,10 @@ components:
       type: object
       additionalProperties: false
       required: [contract_id]
-      oneOf:
+      anyOf:
         - required: [candidate_artifact_id, test_basis_id, check_profile_id]
         - required: [request_id, correlation_id, route_policy, defense_result, check_result]
+        - required: [request_id, correlation_id, route_policy, defense_result, check_result, profile_id]
       properties:
         contract_id:
           type: string
@@ -313,12 +317,19 @@ components:
           example: "mc-request:CVE-2021-44228:waf:1"
         route_policy:
           type: string
-          enum: [registered-waf-route-v1]
+          enum: [registered-waf-route-v1, shared-attack-contracts-v2]
           description: >
-            Selects strict reference-only hydration and the registered WAF
-            route mapping. The request may include test_basis_id as an exact
-            non-executable artifact selector, but may not include executable
+            Selects strict reference-only hydration. registered-waf-route-v1 is
+            the legacy single-case route. shared-attack-contracts-v2 verifies the
+            complete CG semantics and DG application unit, then executes every
+            exact obligation/input assignment. Neither route accepts executable
             candidate or test bodies.
+        profile_id:
+          type: string
+          enum: [waf-standard@1, waf-standard@2]
+          description: >
+            Required only for shared-attack-contracts-v2. Selects the embedded,
+            immutable MC route-adapter profile used for destination-free HTTP templates.
         defense_result:
           allOf:
             - $ref: "#/components/schemas/ImmutableResultLocator"
@@ -614,13 +625,26 @@ components:
         input_provenance:
           type: object
           additionalProperties: false
-          required: [route_policy, defense_result, check_result, selected_test_basis_id, verification]
+          required: [route_policy, defense_result, check_result, verification]
           properties:
-            route_policy: { type: string, enum: [registered-waf-route-v1] }
+            route_policy: { type: string, enum: [registered-waf-route-v1, shared-attack-contracts-v2] }
             defense_result: { $ref: "#/components/schemas/ImmutableResultLocator" }
             check_result: { $ref: "#/components/schemas/ImmutableResultLocator" }
             selected_test_basis_id: { type: string }
             verification: { type: string, enum: [physical-and-logical-sha256-verified] }
+        profile_id:
+          type: string
+          enum: [waf-standard@1, waf-standard@2]
+          description: Present only for shared-contract v2 results.
+        obligation_results:
+          type: array
+          description: One entry for every required CG obligation, with one case for every exact required_input_ref.
+          items:
+            $ref: "#/components/schemas/ObligationResult"
+        accounting:
+          $ref: "#/components/schemas/CoverageAccounting"
+        application_unit:
+          $ref: "#/components/schemas/AppliedApplicationUnit"
         match:
           type: boolean
           description: Whether actual.blocked equals expected.blocked.
@@ -693,6 +717,92 @@ components:
           type: boolean
         status_code:
           type: integer
+
+    ObligationResult:
+      type: object
+      required: [obligation_id, case_results]
+      properties:
+        obligation_id: { type: string, minLength: 1 }
+        case_results:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/ObligationCaseResult"
+
+    ObligationCaseResult:
+      type: object
+      required: [input_id, disposition]
+      properties:
+        input_id: { type: string, minLength: 1 }
+        disposition:
+          type: string
+          enum: [blocked, not-blocked, safety-stop, unsupported]
+        resolution:
+          $ref: "#/components/schemas/HttpRequestTemplateResolution"
+        evidence:
+          type: object
+          properties:
+            blocked: { type: boolean }
+            status_code: { type: integer }
+            reached_app: { type: boolean }
+            matched_rule_id: { type: string }
+            detail: { type: string }
+
+    HttpRequestTemplateResolution:
+      type: object
+      required: [template_id, path_key, resolver_id, profile_id, resolver_profile_digest, rendered_request]
+      properties:
+        template_id: { type: string, minLength: 1 }
+        path_key: { type: string, minLength: 1 }
+        resolver_id: { type: string, enum: [mc-approved-route-adapter] }
+        profile_id: { type: string, enum: [waf-standard@1, waf-standard@2] }
+        resolver_profile_digest: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
+        rendered_request:
+          $ref: "#/components/schemas/SharedHttpRequest"
+
+    SharedHttpRequest:
+      type: object
+      required: [modality, method, scheme, authority, path, query, headers, cookies, body]
+      properties:
+        modality: { type: string, enum: [http-request] }
+        method: { type: string }
+        scheme: { type: string, enum: [http, https] }
+        authority: { type: string, minLength: 1 }
+        path: { type: string, pattern: "^/" }
+        query: { type: array, items: { $ref: "#/components/schemas/SharedHttpField" } }
+        headers: { type: array, items: { $ref: "#/components/schemas/SharedHttpField" } }
+        cookies: { type: array, items: { $ref: "#/components/schemas/SharedHttpField" } }
+        body: { type: object, additionalProperties: true }
+
+    SharedHttpField:
+      type: object
+      required: [name, value]
+      properties:
+        name: { type: string, minLength: 1 }
+        value: { type: string }
+
+    CoverageAccounting:
+      type: object
+      required: [required_obligation_count, accounted_obligation_count, unaccounted_required_obligation_count, source_member_count, represented_source_member_count, unsupported_source_member_count, unaccounted_source_member_count, required_work_item_count, disposed_work_item_count, unaccounted_required_work_item_count]
+      properties:
+        required_obligation_count: { type: integer, minimum: 0 }
+        accounted_obligation_count: { type: integer, minimum: 0 }
+        unaccounted_required_obligation_count: { type: integer, minimum: 0 }
+        source_member_count: { type: integer, minimum: 0 }
+        represented_source_member_count: { type: integer, minimum: 0 }
+        unsupported_source_member_count: { type: integer, minimum: 0 }
+        unaccounted_source_member_count: { type: integer, minimum: 0 }
+        required_work_item_count: { type: integer, minimum: 0 }
+        disposed_work_item_count: { type: integer, minimum: 0 }
+        unaccounted_required_work_item_count: { type: integer, minimum: 0 }
+
+    AppliedApplicationUnit:
+      type: object
+      required: [application_unit_id, artifact_ids, readback_verified]
+      properties:
+        application_unit_id: { type: string, minLength: 1 }
+        artifact_ids: { type: array, minItems: 1, items: { type: string } }
+        readback_verified: { type: boolean, enum: [true] }
 
     ActualOutcome:
       type: object

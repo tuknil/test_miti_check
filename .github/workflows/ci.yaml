@@ -95,7 +95,7 @@ jobs:
     secrets: inherit
     uses: ATT-IDP/revup-workflows/.github/workflows/reusable_workflow_go_ci.yaml@v5
     with:
-      enable_sonar: ${{ github.event.inputs.enable_sonar }}
+      enable_sonar: ${{ github.event_name == 'workflow_dispatch' && inputs.enable_sonar || false }}
       enable_veracode_sast: ${{ github.event.inputs.enable_veracode_sast }}
       enable_veracode_sca: ${{ github.event.inputs.enable_veracode_sca }}
       enable_veracode_pipeline_scan: ${{ github.event.inputs.enable_veracode_pipeline_scan }}

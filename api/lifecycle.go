@@ -229,28 +229,6 @@ func handleRunStatus(w http.ResponseWriter, r *http.Request, id string) {
 	writeJSON(w, http.StatusOK, publicRunStatus(status))
 }
 
-// apiResultKeysToHide are fields kept in the canonical result (Databricks, via
-// result_ref) but not surfaced in the API result response: the embedded rule/test
-// and the execution diagnostics. The response carries envelope + verdict.
-var apiResultKeysToHide = []string{"candidate", "test_basis", "steps", "prose_summary", "limitations"}
-
-// apiResultView strips the hidden keys from the canonical result payload for the
-// API response. On any parse error it returns the payload unchanged.
-func apiResultView(payload []byte) []byte {
-	var m map[string]json.RawMessage
-	if err := json.Unmarshal(payload, &m); err != nil {
-		return payload
-	}
-	for _, k := range apiResultKeysToHide {
-		delete(m, k)
-	}
-	out, err := json.Marshal(m)
-	if err != nil {
-		return payload
-	}
-	return out
-}
-
 func handleRunResult(w http.ResponseWriter, r *http.Request, id string) {
 	run, err := store.GetDurable(r.Context(), id)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -272,7 +250,7 @@ func handleRunResult(w http.ResponseWriter, r *http.Request, id string) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(apiResultView(run.ResultPayload))
+		_, _ = w.Write(run.ResultPayload)
 		return
 	}
 	writeJSON(w, http.StatusOK, publicStatus(run))
@@ -329,6 +307,7 @@ func executeDurableRun(ctx context.Context, run DurableRun) (RunOutcome, error) 
 	ctx, cancel := executionContext(ctx)
 	defer cancel()
 	out := executeRequestedScenario(ctx, req, run.RunID, *run.ResultID)
+	reportExecutionProgress(ctx, "finalizing-result", "Finalizing the canonical mitigation result")
 	out.RequestID = run.RequestID
 	out.RequestSHA256 = run.RequestDigest
 	if len(req.UpstreamInputs) > 0 {
@@ -340,10 +319,14 @@ func executeDurableRun(ctx context.Context, run DurableRun) (RunOutcome, error) 
 	if err := setCanonicalIntegrity(&out); err != nil {
 		return RunOutcome{}, err
 	}
+	reportExecutionProgress(ctx, "result-prepared", "Canonical mitigation result is prepared for publication")
 	return out, nil
 }
 
 func executeRequestedScenario(ctx context.Context, req SubmitMitigationCheckRequest, runID, resultID string) RunOutcome {
+	if v2LocatorMode(req) {
+		return executeSharedContractV2(ctx, req, runID, resultID)
+	}
 	if locatorMode(req) {
 		return executeScenarioByLocator(ctx, req, runID, resultID)
 	}
@@ -360,6 +343,16 @@ func setCanonicalIntegrity(out *RunOutcome) error {
 	payload, err := json.Marshal(unsigned)
 	if err != nil {
 		return err
+	}
+	if out.ProfileID != "" {
+		var document any
+		if err := decodeJSONAny(payload, &document); err != nil {
+			return err
+		}
+		payload, err = marshalRFC8785(document)
+		if err != nil {
+			return err
+		}
 	}
 	sum := sha256.Sum256(payload)
 	out.ContentSHA256 = "sha256:" + hex.EncodeToString(sum[:])

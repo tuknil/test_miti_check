@@ -8,9 +8,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -25,15 +25,16 @@ import (
 )
 
 const (
-	locatorRoutePolicy     = "registered-waf-route-v1"
-	locatorCatalog         = "36889_janus_dev"
-	defenseSchema          = "defense_generation"
-	defenseTable           = "defense_generation_results"
-	checkSchema            = "check_generation"
-	checkTable             = "check_generation_results"
-	checkPayloadVolume     = "payloads"
-	maxLocatorPayloadBytes = 200 << 20
-	locatorSQLTimeout      = 60 * time.Second
+	locatorRoutePolicy        = "registered-waf-route-v1"
+	locatorCatalog            = "36889_janus_dev"
+	defenseSchema             = "defense_generation"
+	defenseTable              = "defense_generation_results"
+	checkSchema               = "check_generation"
+	checkTable                = "check_generation_results"
+	checkPayloadVolume        = "payloads"
+	maxLocatorPayloadBytes    = 200 << 20
+	locatorDatabricksTimeout  = 30 * time.Second
+	maxStatementResponseBytes = 4 << 20
 )
 
 type ImmutableResultLocator struct {
@@ -55,7 +56,7 @@ type LocatorProvenance struct {
 	RoutePolicy         string                 `json:"route_policy"`
 	DefenseResult       ImmutableResultLocator `json:"defense_result"`
 	CheckResult         ImmutableResultLocator `json:"check_result"`
-	SelectedTestBasisID string                 `json:"selected_test_basis_id"`
+	SelectedTestBasisID string                 `json:"selected_test_basis_id,omitempty"`
 	Verification        string                 `json:"verification"`
 }
 
@@ -106,6 +107,9 @@ func validateLocatorRequest(req SubmitMitigationCheckRequest) []string {
 	}
 	if req.CheckProfileID != "" {
 		bad = append(bad, "check_profile_id")
+	}
+	if req.ProfileID != "" {
+		bad = append(bad, "profile_id")
 	}
 	if req.SubstrateSelector != "" {
 		bad = append(bad, "substrate_selector")
@@ -207,21 +211,12 @@ type databricksLocatorResolver struct {
 }
 
 func newDatabricksLocatorResolverFromEnv() (*databricksLocatorResolver, error) {
-	dsn := strings.TrimSpace(os.Getenv("DATABRICKS_DSN"))
-	if dsn == "" {
-		return nil, fmt.Errorf("DATABRICKS_DSN is required for reference-only execution")
-	}
-	db, err := sql.Open("databricks", normalizeDatabricksDSN(dsn))
+	config, err := locatorDatabricksConfigFromEnv()
 	if err != nil {
-		return nil, fmt.Errorf("open Databricks reader: %w", err)
-	}
-	db.SetMaxOpenConns(4)
-	files, err := newDatabricksFilesClient(dsn)
-	if err != nil {
-		_ = db.Close()
 		return nil, err
 	}
-	return &databricksLocatorResolver{source: &sqlLocatorRowSource{db: db, files: files}, closer: db}, nil
+	source := newStatementLocatorRowSource(config, nil)
+	return &databricksLocatorResolver{source: source}, nil
 }
 
 func (r *databricksLocatorResolver) Close() error {
@@ -277,55 +272,220 @@ type checkRow struct {
 	CreatedAt                                                                                                              string
 }
 
-type sqlLocatorRowSource struct {
-	db    *sql.DB
-	files *databricksFilesClient
+type locatorDatabricksConfig struct {
+	baseURL, token, warehouseID string
+	timeout                     time.Duration
 }
 
-func (s *sqlLocatorRowSource) Defense(ctx context.Context, resultID string) ([]defenseRow, error) {
-	queryCtx, cancel := locatorSQLContext(ctx)
-	defer cancel()
-	rows, err := s.db.QueryContext(queryCtx, "SELECT run_id, result_id, terminal_state, TO_JSON(result_json) FROM `36889_janus_dev`.`defense_generation`.`defense_generation_results` WHERE result_id = ?", resultID)
+func locatorDatabricksConfigFromEnv() (locatorDatabricksConfig, error) {
+	dsn := strings.TrimSpace(os.Getenv("DATABRICKS_DSN"))
+	host := strings.TrimSpace(os.Getenv("DATABRICKS_HOST"))
+	token := strings.TrimSpace(os.Getenv("DATABRICKS_TOKEN"))
+	warehouseID := strings.TrimSpace(os.Getenv("DATABRICKS_WAREHOUSE_ID"))
+	if dsn != "" {
+		parsed, err := url.Parse("databricks://" + dsn)
+		if err != nil || parsed.User == nil || parsed.Hostname() == "" {
+			return locatorDatabricksConfig{}, errors.New("DATABRICKS_DSN is invalid")
+		}
+		if host == "" {
+			host = parsed.Hostname()
+		}
+		if token == "" {
+			token, _ = parsed.User.Password()
+		}
+		if warehouseID == "" {
+			const prefix = "/sql/1.0/warehouses/"
+			if strings.HasPrefix(parsed.Path, prefix) {
+				warehouseID = strings.Trim(strings.TrimPrefix(parsed.Path, prefix), "/")
+			}
+		}
+	}
+	if host == "" || token == "" || warehouseID == "" {
+		return locatorDatabricksConfig{}, errors.New("Databricks host, token, and warehouse ID are required for reference-only execution")
+	}
+	if !strings.Contains(host, "://") {
+		host = "https://" + host
+	}
+	parsedHost, err := url.Parse(host)
+	if err != nil || parsedHost.Hostname() == "" || (parsedHost.Scheme != "https" && !(parsedHost.Scheme == "http" && isLoopbackLocatorHost(parsedHost.Hostname()))) {
+		return locatorDatabricksConfig{}, errors.New("DATABRICKS_HOST must use https except for loopback test hosts")
+	}
+	timeout := locatorDatabricksTimeout
+	if raw := strings.TrimSpace(os.Getenv("DATABRICKS_TIMEOUT")); raw != "" {
+		parsed, parseErr := time.ParseDuration(raw)
+		if parseErr != nil || parsed <= 0 {
+			return locatorDatabricksConfig{}, fmt.Errorf("parse DATABRICKS_TIMEOUT: %q", raw)
+		}
+		timeout = parsed
+	}
+	return locatorDatabricksConfig{baseURL: strings.TrimRight(host, "/"), token: token, warehouseID: warehouseID, timeout: timeout}, nil
+}
+
+func isLoopbackLocatorHost(host string) bool {
+	return host == "127.0.0.1" || host == "::1" || host == "localhost"
+}
+
+type statementLocatorRowSource struct {
+	config locatorDatabricksConfig
+	client *http.Client
+}
+
+func newStatementLocatorRowSource(config locatorDatabricksConfig, client *http.Client) *statementLocatorRowSource {
+	if config.timeout <= 0 {
+		config.timeout = locatorDatabricksTimeout
+	}
+	if client == nil {
+		client = &http.Client{Timeout: config.timeout}
+	}
+	return &statementLocatorRowSource{config: config, client: client}
+}
+
+type locatorStatementParameter struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+	Type  string `json:"type"`
+}
+
+type locatorStatementRequest struct {
+	Statement   string                      `json:"statement"`
+	WarehouseID string                      `json:"warehouse_id"`
+	WaitTimeout string                      `json:"wait_timeout"`
+	Parameters  []locatorStatementParameter `json:"parameters"`
+}
+
+func (s *statementLocatorRowSource) execute(ctx context.Context, statement, resultID string) ([][]string, error) {
+	waitSeconds := int(s.config.timeout.Round(time.Second).Seconds())
+	if waitSeconds < 5 {
+		waitSeconds = 5
+	}
+	if waitSeconds > 50 {
+		waitSeconds = 50
+	}
+	payload := locatorStatementRequest{
+		Statement: statement, WarehouseID: s.config.warehouseID, WaitTimeout: fmt.Sprintf("%ds", waitSeconds),
+		Parameters: []locatorStatementParameter{{Name: "result_id", Value: resultID, Type: "STRING"}},
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []defenseRow
-	for rows.Next() {
-		var row defenseRow
-		if err := rows.Scan(&row.RunID, &row.ResultID, &row.TerminalState, &row.ResultJSON); err != nil {
-			return nil, err
-		}
-		out = append(out, row)
-	}
-	return out, rows.Err()
-}
-
-func (s *sqlLocatorRowSource) Check(ctx context.Context, resultID string) ([]checkRow, error) {
-	queryCtx, cancel := locatorSQLContext(ctx)
+	requestCtx, cancel := context.WithTimeout(ctx, s.config.timeout)
 	defer cancel()
-	rows, err := s.db.QueryContext(queryCtx, "SELECT result_id, run_id, request_id, correlation_id, capability, terminal_state, status, TO_JSON(result_json), TO_JSON(completion_json), result_sha256, result_size_bytes, CAST(created_at AS STRING) FROM `36889_janus_dev`.`check_generation`.`check_generation_results` WHERE result_id = ?", resultID)
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, s.config.baseURL+"/api/2.0/sql/statements", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []checkRow
-	for rows.Next() {
-		var row checkRow
-		if err := rows.Scan(&row.ResultID, &row.RunID, &row.RequestID, &row.CorrelationID, &row.Capability, &row.TerminalState, &row.Status, &row.ResultJSON, &row.CompletionJSON, &row.ResultSHA256, &row.ResultSizeBytes, &row.CreatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, row)
+	req.Header.Set("Authorization", "Bearer "+s.config.token)
+	req.Header.Set("Content-Type", "application/json")
+	response, err := s.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("Databricks Statement Execution request: %w", err)
 	}
-	return out, rows.Err()
+	defer response.Body.Close()
+	responseBody, err := io.ReadAll(io.LimitReader(response.Body, maxStatementResponseBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read Databricks Statement Execution response: %w", err)
+	}
+	if len(responseBody) > maxStatementResponseBytes {
+		return nil, errors.New("Databricks Statement Execution response exceeds byte limit")
+	}
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return nil, fmt.Errorf("Databricks Statement Execution returned HTTP %d: %s", response.StatusCode, truncateLocatorError(responseBody))
+	}
+	var decoded struct {
+		Status struct {
+			State string `json:"state"`
+			Error struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		} `json:"status"`
+		Result struct {
+			DataArray [][]string `json:"data_array"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(responseBody, &decoded); err != nil {
+		return nil, fmt.Errorf("decode Databricks Statement Execution response: %w", err)
+	}
+	if decoded.Status.State != "SUCCEEDED" {
+		if decoded.Status.Error.Message != "" {
+			return nil, fmt.Errorf("Databricks statement %s: %s", strings.ToLower(decoded.Status.State), decoded.Status.Error.Message)
+		}
+		return nil, fmt.Errorf("Databricks statement did not succeed: %s", decoded.Status.State)
+	}
+	return decoded.Result.DataArray, nil
 }
 
-func (s *sqlLocatorRowSource) Volume(ctx context.Context, path string, size int64) ([]byte, error) {
-	return s.files.read(ctx, path, size)
+func truncateLocatorError(body []byte) string {
+	value := strings.TrimSpace(string(body))
+	if len(value) > 500 {
+		return value[:500] + "..."
+	}
+	return value
 }
 
-func locatorSQLContext(parent context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(parent, locatorSQLTimeout)
+func (s *statementLocatorRowSource) Defense(ctx context.Context, resultID string) ([]defenseRow, error) {
+	rows, err := s.execute(ctx, "SELECT run_id, result_id, terminal_state, TO_JSON(result_json) FROM `36889_janus_dev`.`defense_generation`.`defense_generation_results` WHERE result_id = :result_id LIMIT 2", resultID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]defenseRow, 0, len(rows))
+	for _, values := range rows {
+		if len(values) != 4 {
+			return nil, errors.New("Defense Generation locator row is incomplete")
+		}
+		out = append(out, defenseRow{RunID: values[0], ResultID: values[1], TerminalState: values[2], ResultJSON: values[3]})
+	}
+	return out, nil
+}
+
+func (s *statementLocatorRowSource) Check(ctx context.Context, resultID string) ([]checkRow, error) {
+	rows, err := s.execute(ctx, "SELECT result_id, run_id, request_id, correlation_id, capability, terminal_state, status, TO_JSON(result_json), TO_JSON(completion_json), result_sha256, CAST(result_size_bytes AS STRING), CAST(created_at AS STRING) FROM `36889_janus_dev`.`check_generation`.`check_generation_results` WHERE result_id = :result_id LIMIT 2", resultID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]checkRow, 0, len(rows))
+	for _, values := range rows {
+		if len(values) != 12 {
+			return nil, errors.New("Check Generation locator row is incomplete")
+		}
+		size, parseErr := strconv.ParseInt(values[10], 10, 64)
+		if parseErr != nil {
+			return nil, errors.New("Check Generation result_size_bytes is invalid")
+		}
+		out = append(out, checkRow{ResultID: values[0], RunID: values[1], RequestID: values[2], CorrelationID: values[3], Capability: values[4], TerminalState: values[5], Status: values[6], ResultJSON: values[7], CompletionJSON: values[8], ResultSHA256: values[9], ResultSizeBytes: size, CreatedAt: values[11]})
+	}
+	return out, nil
+}
+
+func (s *statementLocatorRowSource) Volume(ctx context.Context, path string, expected int64) ([]byte, error) {
+	prefix := "/Volumes/" + locatorCatalog + "/" + checkSchema + "/" + checkPayloadVolume + "/sha256/"
+	if !strings.HasPrefix(path, prefix) || expected < 1 || expected > maxLocatorPayloadBytes {
+		return nil, errors.New("Volume path or size is outside the allowlist")
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, s.config.timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, s.config.baseURL+"/api/2.0/fs/files"+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+s.config.token)
+	response, err := s.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("Databricks Files API request: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 501))
+		return nil, fmt.Errorf("Databricks Files API returned HTTP %d: %s", response.StatusCode, truncateLocatorError(body))
+	}
+	content, err := io.ReadAll(io.LimitReader(response.Body, expected+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(content)) != expected {
+		return nil, errors.New("Files API payload size differs from manifest")
+	}
+	return content, nil
 }
 
 // defenseCanonicalResult follows the producer's Go field order exactly.
@@ -397,26 +557,28 @@ type defenseUpstreamResultRef struct {
 	CreatedAt     string           `json:"created_at,omitempty"`
 }
 type defenseCanonicalResult struct {
-	Capability         string                     `json:"capability"`
-	ContractID         string                     `json:"contract_id"`
-	RequestID          string                     `json:"request_id"`
-	CorrelationID      string                     `json:"correlation_id"`
-	RunID              string                     `json:"run_id"`
-	ResultID           string                     `json:"result_id"`
-	Status             string                     `json:"status"`
-	TerminalState      string                     `json:"terminal_state"`
-	ResultRef          *defenseResultRef          `json:"result_ref,omitempty"`
-	EvidenceRefs       []string                   `json:"evidence_refs"`
-	OutcomeReason      defenseOutcomeReason       `json:"outcome_reason"`
-	PrimaryCandidate   *defenseCandidate          `json:"primary_candidate,omitempty"`
-	ProofHandoffs      []defenseProofHandoff      `json:"proof_handoffs,omitempty"`
-	AttemptHistory     []defenseAttemptRecord     `json:"attempt_history"`
-	ProseSummary       string                     `json:"prose_summary"`
-	RequestDigest      string                     `json:"request_digest"`
-	UpstreamResultRefs []defenseUpstreamResultRef `json:"upstream_result_refs"`
-	ContentSHA256      string                     `json:"content_sha256,omitempty"`
-	SizeBytes          int64                      `json:"size_bytes,omitempty"`
-	CreatedAt          string                     `json:"created_at"`
+	Capability                string                     `json:"capability"`
+	ContractID                string                     `json:"contract_id"`
+	RequestID                 string                     `json:"request_id"`
+	CorrelationID             string                     `json:"correlation_id"`
+	RunID                     string                     `json:"run_id"`
+	ResultID                  string                     `json:"result_id"`
+	Status                    string                     `json:"status"`
+	TerminalState             string                     `json:"terminal_state"`
+	ResultRef                 *defenseResultRef          `json:"result_ref,omitempty"`
+	EvidenceRefs              []string                   `json:"evidence_refs"`
+	OutcomeReason             defenseOutcomeReason       `json:"outcome_reason"`
+	PrimaryCandidate          *defenseCandidate          `json:"primary_candidate,omitempty"`
+	CandidateBundle           json.RawMessage            `json:"candidate_bundle,omitempty"`
+	CandidateArtifactContents map[string]json.RawMessage `json:"candidate_artifact_contents,omitempty"`
+	ProofHandoffs             []defenseProofHandoff      `json:"proof_handoffs,omitempty"`
+	AttemptHistory            []defenseAttemptRecord     `json:"attempt_history"`
+	ProseSummary              string                     `json:"prose_summary"`
+	RequestDigest             string                     `json:"request_digest"`
+	UpstreamResultRefs        []defenseUpstreamResultRef `json:"upstream_result_refs"`
+	ContentSHA256             string                     `json:"content_sha256,omitempty"`
+	SizeBytes                 int64                      `json:"size_bytes,omitempty"`
+	CreatedAt                 string                     `json:"created_at"`
 }
 
 func verifyDefenseRow(row defenseRow, locator ImmutableResultLocator) (CandidateSpec, []string, error) {
@@ -515,7 +677,11 @@ func (r *databricksLocatorResolver) verifyCheckRow(ctx context.Context, row chec
 	}
 	completionRef, _ := completion["result_ref"].(map[string]any)
 	completionSize, sizeOK := int64Value(completion["size_bytes"])
-	if stringValue(completion["capability"]) != locator.Capability || stringValue(completion["contract_id"]) != "capability-completion@1.0" || stringValue(completion["result_contract_type"]) != "check-generation-result" || stringValue(completion["result_contract_version"]) != "1.0" || stringValue(completion["result_id"]) != locator.ResultID || stringValue(completion["run_id"]) != locator.RunID || stringValue(completion["request_id"]) != locator.RequestID || stringValue(completion["correlation_id"]) != locator.CorrelationID || stringValue(completion["terminal_state"]) != locator.TerminalState || stringValue(completion["status"]) != locator.Status || stringValue(completion["content_sha256"]) != locator.ContentSHA256 || !sizeOK || completionSize != locator.SizeBytes || stringValue(completionRef["system"]) != "databricks" || stringValue(completionRef["catalog"]) != locatorCatalog || stringValue(completionRef["schema"]) != checkSchema || stringValue(completionRef["table"]) != checkTable || stringValue(completionRef["key"]) != locator.ResultID {
+	resultContractType, resultContractVersion := "check-generation-result", "1.0"
+	if locator.ContractID == "check-generation@2.1" {
+		resultContractType, resultContractVersion = "check-generation", "2.1"
+	}
+	if stringValue(completion["capability"]) != locator.Capability || stringValue(completion["contract_id"]) != "capability-completion@1.0" || stringValue(completion["result_contract_type"]) != resultContractType || stringValue(completion["result_contract_version"]) != resultContractVersion || stringValue(completion["result_id"]) != locator.ResultID || stringValue(completion["run_id"]) != locator.RunID || stringValue(completion["request_id"]) != locator.RequestID || stringValue(completion["correlation_id"]) != locator.CorrelationID || stringValue(completion["terminal_state"]) != locator.TerminalState || stringValue(completion["status"]) != locator.Status || stringValue(completion["content_sha256"]) != locator.ContentSHA256 || !sizeOK || completionSize != locator.SizeBytes || stringValue(completionRef["system"]) != "databricks" || stringValue(completionRef["catalog"]) != locatorCatalog || stringValue(completionRef["schema"]) != checkSchema || stringValue(completionRef["table"]) != checkTable || stringValue(completionRef["key"]) != locator.ResultID {
 		return nil, nil, fmt.Errorf("Check Generation completion identity differs from locator")
 	}
 	upstreamRefs, upstreamOK := completion["upstream_result_refs"].([]any)
@@ -527,7 +693,7 @@ func (r *databricksLocatorResolver) verifyCheckRow(ctx context.Context, row chec
 	for _, key := range []string{"capability", "result_id", "run_id", "request_id", "correlation_id", "terminal_state", "status", "upstream_result_refs", "evidence_refs", "subject_record_revision_id", "characterization_revision_id", "created_at"} {
 		core[key] = completion[key]
 	}
-	core["contract_id"] = locator.ContractID
+	core["contract_id"] = "check-generation-result@1.0"
 	var nested any
 	if err := decodeJSONAny(stored.RunResult, &nested); err != nil {
 		return nil, nil, err
@@ -828,56 +994,4 @@ func sameTimestamp(first, second string) bool {
 	a, firstErr := parse(first)
 	b, secondErr := parse(second)
 	return firstErr == nil && secondErr == nil && a.Equal(b)
-}
-
-// Files API credentials are derived without logging or persisting the PAT.
-type databricksFilesClient struct {
-	baseURL, token string
-	client         *http.Client
-}
-
-func newDatabricksFilesClient(dsn string) (*databricksFilesClient, error) {
-	host, token := strings.TrimSpace(os.Getenv("DATABRICKS_HOST")), strings.TrimSpace(os.Getenv("DATABRICKS_TOKEN"))
-	if host == "" || token == "" {
-		parsed, err := url.Parse("databricks://" + dsn)
-		if err != nil || parsed.User == nil {
-			return nil, fmt.Errorf("DATABRICKS_DSN cannot provide Files API credentials")
-		}
-		token, _ = parsed.User.Password()
-		host = parsed.Hostname()
-	}
-	if host == "" || token == "" {
-		return nil, fmt.Errorf("Databricks host and token are required for Volume hydration")
-	}
-	if !strings.HasPrefix(host, "https://") {
-		host = "https://" + host
-	}
-	return &databricksFilesClient{baseURL: strings.TrimRight(host, "/"), token: token, client: &http.Client{Timeout: 90 * time.Second}}, nil
-}
-func (c *databricksFilesClient) read(ctx context.Context, path string, expected int64) ([]byte, error) {
-	prefix := "/Volumes/" + locatorCatalog + "/" + checkSchema + "/" + checkPayloadVolume + "/sha256/"
-	if !strings.HasPrefix(path, prefix) || expected < 1 || expected > maxLocatorPayloadBytes {
-		return nil, fmt.Errorf("Volume path or size is outside the allowlist")
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/2.0/fs/files"+path, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
-	response, err := c.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Files API returned status %d", response.StatusCode)
-	}
-	content, err := io.ReadAll(io.LimitReader(response.Body, expected+1))
-	if err != nil {
-		return nil, err
-	}
-	if int64(len(content)) != expected {
-		return nil, fmt.Errorf("Files API payload size differs from manifest")
-	}
-	return content, nil
 }

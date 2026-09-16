@@ -1,0 +1,1607 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.janus.internal/contracts/common/janus-contract-common-1.0.schema.json",
+  "title": "Janus shared contract definitions 1.0",
+  "$defs": {
+    "StableId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"
+    },
+    "Revision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "Digest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "Timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "ControlClass": {
+      "enum": [
+        "waf",
+        "firewall",
+        "edr"
+      ]
+    },
+    "TypedRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "scope",
+        "id"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "source-member",
+            "source-artifact",
+            "test-input",
+            "component",
+            "coverage-group",
+            "obligation",
+            "slot",
+            "evidence",
+            "artifact",
+            "directive",
+            "atomic-group"
+          ]
+        },
+        "scope": {
+          "$ref": "#/$defs/StableId"
+        },
+        "id": {
+          "$ref": "#/$defs/StableId"
+        }
+      }
+    },
+    "ImmutableLocator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "uri",
+        "digest",
+        "media_type",
+        "byte_length",
+        "immutable"
+      ],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "media_type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "byte_length": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16777216
+        },
+        "immutable": {
+          "const": true
+        }
+      }
+    },
+    "IdentityBinding": {
+      "description": "Cycle-free binding from embedded attack semantics to its enclosing check-generation@2.1 result. The outer result locator and content digest are verified separately and are forbidden here.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_id",
+        "result_id",
+        "source_projection_digest",
+        "digest_profile",
+        "member_count",
+        "artifact_count"
+      ],
+      "properties": {
+        "contract_id": {
+          "const": "check-generation@2.1"
+        },
+        "result_id": {
+          "$ref": "#/$defs/StableId"
+        },
+        "revision": {
+          "description": "Enclosing CG result revision when the producer exposes one.",
+          "$ref": "#/$defs/Revision"
+        },
+        "source_projection_digest": {
+          "description": "RFC 8785 SHA-256 digest of the enclosing result object projected to artifacts, input_membership, member_results, and test_inputs only.",
+          "$ref": "#/$defs/Digest"
+        },
+        "digest_profile": {
+          "description": "Selects the exact source projection and canonicalization rule.",
+          "const": "rfc8785-sha256-cg-source-projection-v1"
+        },
+        "member_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256
+        },
+        "artifact_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256
+        }
+      }
+    },
+    "SourceMemberBinding": {
+      "description": "Complete per-member CG binding. Positive terminal states retain one or more generated artifact references. Nonpositive terminal states retain the member with no generated artifact references.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "member_id",
+        "signal_id",
+        "affected_artifact_id",
+        "terminal_state",
+        "artifact_refs"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "terminal_state": {
+                "enum": [
+                  "verified",
+                  "signal-produced"
+                ]
+              }
+            },
+            "required": [
+              "terminal_state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "artifact_refs": {
+                "minItems": 1
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "artifact_refs": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "member_id": {
+          "$ref": "#/$defs/StableId"
+        },
+        "signal_id": {
+          "$ref": "#/$defs/StableId"
+        },
+        "affected_artifact_id": {
+          "$ref": "#/$defs/StableId"
+        },
+        "terminal_state": {
+          "enum": [
+            "verified",
+            "signal-produced",
+            "could-not-verify",
+            "no-checkable-signal",
+            "scope-declined"
+          ]
+        },
+        "artifact_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TypedRef"
+          }
+        }
+      }
+    },
+    "SourceBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "check_generation",
+        "artifacts",
+        "members"
+      ],
+      "properties": {
+        "check_generation": {
+          "$ref": "#/$defs/IdentityBinding"
+        },
+        "artifacts": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "artifact_id",
+              "artifact_kind",
+              "signal_ids",
+              "affected_artifact_ids",
+              "content",
+              "member_refs"
+            ],
+            "properties": {
+              "artifact_id": {
+                "$ref": "#/$defs/StableId"
+              },
+              "artifact_kind": {
+                "type": "string",
+                "minLength": 1
+              },
+              "signal_ids": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "$ref": "#/$defs/StableId"
+                }
+              },
+              "affected_artifact_ids": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "$ref": "#/$defs/StableId"
+                }
+              },
+              "content": {
+                "$ref": "#/$defs/ImmutableLocator"
+              },
+              "member_refs": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "$ref": "#/$defs/TypedRef"
+                }
+              }
+            }
+          }
+        },
+        "members": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": {
+            "$ref": "#/$defs/SourceMemberBinding"
+          }
+        }
+      }
+    },
+    "Evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_id",
+        "kind",
+        "locator"
+      ],
+      "properties": {
+        "evidence_id": {
+          "$ref": "#/$defs/StableId"
+        },
+        "kind": {
+          "enum": [
+            "source",
+            "observation",
+            "test-result",
+            "policy",
+            "profile",
+            "artifact",
+            "transformation"
+          ]
+        },
+        "locator": {
+          "$ref": "#/$defs/ImmutableLocator"
+        },
+        "description": {
+          "type": "string"
+        }
+      }
+    },
+    "Body": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "state"
+          ],
+          "properties": {
+            "state": {
+              "const": "absent"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "state",
+            "content_base64",
+            "content_length",
+            "digest"
+          ],
+          "properties": {
+            "state": {
+              "const": "empty"
+            },
+            "content_base64": {
+              "const": ""
+            },
+            "content_length": {
+              "const": 0
+            },
+            "digest": {
+              "const": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "state",
+            "content",
+            "content_length"
+          ],
+          "properties": {
+            "state": {
+              "const": "present"
+            },
+            "content": {
+              "$ref": "#/$defs/ImmutableLocator"
+            },
+            "content_length": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      ]
+    },
+    "HttpField": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "value"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "value": {
+          "type": "string"
+        }
+      }
+    },
+    "NetworkEndpoint": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "address",
+            "port"
+          ],
+          "properties": {
+            "address": {
+              "type": "string",
+              "minLength": 1
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "address"
+          ],
+          "properties": {
+            "address": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "HttpTestInput": {
+      "description": "A fully rendered HTTP execution input. Unlike an HTTP request template, it contains the resolved scheme, authority, and path.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "modality",
+        "method",
+        "scheme",
+        "authority",
+        "path",
+        "query",
+        "headers",
+        "cookies",
+        "body"
+      ],
+      "properties": {
+        "modality": {
+          "const": "http-request"
+        },
+        "method": {
+          "type": "string"
+        },
+        "scheme": {
+          "enum": [
+            "http",
+            "https"
+          ]
+        },
+        "authority": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "query": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HttpField"
+          }
+        },
+        "headers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HttpField"
+          }
+        },
+        "cookies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HttpField"
+          }
+        },
+        "body": {
+          "$ref": "#/$defs/Body"
+        }
+      }
+    },
+    "HttpRequestTemplate": {
+      "description": "A destination-free HTTP candidate emitted by Check Generation. path_key names a route in an approved consumer profile or registry; it is not a path, URI, scheme, authority, host, or other destination.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "modality",
+        "method",
+        "path_key",
+        "query",
+        "headers",
+        "cookies",
+        "body"
+      ],
+      "properties": {
+        "modality": {
+          "const": "http-request-template"
+        },
+        "method": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path_key": {
+          "description": "Opaque approved-registry lookup key. URI syntax and leading-slash paths are forbidden.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$"
+        },
+        "query": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HttpField"
+          }
+        },
+        "headers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HttpField"
+          }
+        },
+        "cookies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HttpField"
+          }
+        },
+        "body": {
+          "$ref": "#/$defs/Body"
+        }
+      }
+    },
+    "HttpRequestTemplateResolution": {
+      "description": "MC or BV evidence showing how an approved route adapter resolved one CG template. The exact fully rendered request is authoritative execution evidence.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "template_id",
+        "path_key",
+        "resolver_id",
+        "profile_id",
+        "resolver_profile_digest",
+        "rendered_request"
+      ],
+      "properties": {
+        "template_id": {
+          "$ref": "#/$defs/StableId"
+        },
+        "path_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$"
+        },
+        "resolver_id": {
+          "$ref": "#/$defs/StableId"
+        },
+        "profile_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@-]*$"
+        },
+        "resolver_profile_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "rendered_request": {
+          "$ref": "#/$defs/HttpTestInput"
+        }
+      }
+    },
+    "NetworkTestInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "modality",
+        "transport",
+        "source",
+        "destination",
+        "direction",
+        "payload"
+      ],
+      "properties": {
+        "modality": {
+          "const": "network-flow"
+        },
+        "transport": {
+          "enum": [
+            "tcp",
+            "udp",
+            "icmp"
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/NetworkEndpoint"
+        },
+        "destination": {
+          "$ref": "#/$defs/NetworkEndpoint"
+        },
+        "direction": {
+          "enum": [
+            "ingress",
+            "egress",
+            "lateral"
+          ]
+        },
+        "payload": {
+          "$ref": "#/$defs/Body"
+        }
+      }
+    },
+    "EndpointTestInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "modality",
+        "endpoint_ref",
+        "activity_type",
+        "subject",
+        "attributes"
+      ],
+      "properties": {
+        "modality": {
+          "const": "endpoint-activity"
+        },
+        "endpoint_ref": {
+          "$ref": "#/$defs/StableId"
+        },
+        "activity_type": {
+          "enum": [
+            "process-start",
+            "file-write",
+            "registry-change",
+            "network-connect",
+            "module-load",
+            "script-execution"
+          ]
+        },
+        "subject": {
+          "type": "string",
+          "minLength": 1
+        },
+        "attributes": {
+          "type": "object",
+          "additionalProperties": {
+            "type": [
+              "string",
+              "integer",
+              "boolean",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "TestInput": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/HttpTestInput"
+        },
+        {
+          "$ref": "#/$defs/HttpRequestTemplate"
+        },
+        {
+          "$ref": "#/$defs/NetworkTestInput"
+        },
+        {
+          "$ref": "#/$defs/EndpointTestInput"
+        }
+      ]
+    },
+    "Location": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "family",
+            "kind"
+          ],
+          "properties": {
+            "family": {
+              "const": "http"
+            },
+            "kind": {
+              "enum": [
+                "http-scheme",
+                "http-authority",
+                "http-path",
+                "http-method",
+                "http-body-raw"
+              ]
+            },
+            "occurrence": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "family",
+            "kind",
+            "name"
+          ],
+          "properties": {
+            "family": {
+              "const": "http"
+            },
+            "kind": {
+              "enum": [
+                "http-query",
+                "http-header",
+                "http-cookie"
+              ]
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "occurrence": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "family",
+            "kind",
+            "selector_type",
+            "selector"
+          ],
+          "properties": {
+            "family": {
+              "const": "http"
+            },
+            "kind": {
+              "const": "http-body-structured"
+            },
+            "selector_type": {
+              "enum": [
+                "json-pointer",
+                "form-field",
+                "multipart-name",
+                "xpath"
+              ]
+            },
+            "selector": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "family",
+            "kind"
+          ],
+          "properties": {
+            "family": {
+              "const": "network"
+            },
+            "kind": {
+              "enum": [
+                "network-source",
+                "network-destination",
+                "network-transport",
+                "network-payload",
+                "network-direction"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "family",
+            "kind",
+            "field"
+          ],
+          "properties": {
+            "family": {
+              "const": "endpoint"
+            },
+            "kind": {
+              "enum": [
+                "process-command-line",
+                "process-image",
+                "process-ancestry",
+                "file-path",
+                "registry-key",
+                "network-connection",
+                "module",
+                "script-content"
+              ]
+            },
+            "field": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "RepresentationStage": {
+      "enum": [
+        "wire-bytes",
+        "transport-payload",
+        "protocol-message",
+        "parsed-field",
+        "decoded-value",
+        "normalized-value",
+        "token-sequence",
+        "rendered-material"
+      ]
+    },
+    "Transformation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "step_id",
+        "order",
+        "operation",
+        "direction",
+        "input_stage",
+        "output_stage",
+        "parameters",
+        "preconditions",
+        "evidence_refs",
+        "failure"
+      ],
+      "properties": {
+        "step_id": {
+          "$ref": "#/$defs/StableId"
+        },
+        "order": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 63
+        },
+        "operation": {
+          "enum": [
+            "encode",
+            "decode",
+            "parse",
+            "serialize",
+            "extract",
+            "token-substitute",
+            "concatenate",
+            "separator-substitute",
+            "normalize",
+            "decompress",
+            "repeat",
+            "custom"
+          ]
+        },
+        "direction": {
+          "enum": [
+            "forward",
+            "reverse"
+          ]
+        },
+        "input_stage": {
+          "$ref": "#/$defs/RepresentationStage"
+        },
+        "output_stage": {
+          "$ref": "#/$defs/RepresentationStage"
+        },
+        "parameters": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/CodecParameters"
+            },
+            {
+              "$ref": "#/$defs/ParseParameters"
+            },
+            {
+              "$ref": "#/$defs/SerializeParameters"
+            },
+            {
+              "$ref": "#/$defs/ExtractParameters"
+            },
+            {
+              "$ref": "#/$defs/TokenSubstituteParameters"
+            },
+            {
+              "$ref": "#/$defs/ConcatenateParameters"
+            },
+            {
+              "$ref": "#/$defs/SeparatorSubstituteParameters"
+            },
+            {
+              "$ref": "#/$defs/NormalizeParameters"
+            },
+            {
+              "$ref": "#/$defs/DecompressParameters"
+            },
+            {
+              "$ref": "#/$defs/RepeatParameters"
+            },
+            {
+              "$ref": "#/$defs/CustomParameters"
+            }
+          ]
+        },
+        "preconditions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "evidence_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/TypedRef"
+          }
+        },
+        "failure": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "behavior"
+          ],
+          "properties": {
+            "code": {
+              "$ref": "#/$defs/StableId"
+            },
+            "behavior": {
+              "enum": [
+                "reject",
+                "no-match"
+              ]
+            }
+          }
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "operation": {
+              "const": "encode"
+            },
+            "parameters": {
+              "$ref": "#/$defs/CodecParameters"
+            }
+          }
+        },
+        {
+          "properties": {
+            "operation": {
+              "const": "decode"
+            },
+            "parameters": {
+              "$ref": "#/$defs/CodecParameters"
+            }
+          }
+        },
+        {
+          "properties": {
+            "operation": {
+              "const": "parse"
+            },
+            "parameters": {
+              "$ref": "#/$defs/ParseParameters"
+            }
+          }
+        },
+        {
+          "properties": {
+            "operation": {
+              "const": "serialize"
+            },
+            "parameters": {
+              "$ref": "#/$defs/SerializeParameters"
+            }
+          }
+        },
+        {
+          "properties": {
+            "operation": {
+              "const": "extract"
+            },
+            "parameters": {
+              "$ref": "#/$defs/ExtractParameters"
+            }
+          }
+        },
+        {
+          "properties": {
+            "operation": {
+              "const": "token-substitute"
+            },
+            "parameters": {
+              "$ref": "#/$defs/TokenSubstituteParameters"
+            }
+          }
+        },
+        {
+          "properties": {
+            "operation": {
+              "const": "concatenate"
+            },
+            "parameters": {
+              "$ref": "#/$defs/ConcatenateParameters"
+            }
+          }
+        },
+        {
+          "properties": {
+            "operation": {
+              "const": "separator-substitute"
+            },
+            "parameters": {
+              "$ref": "#/$defs/SeparatorSubstituteParameters"
+            }
+          }
+        },
+        {
+          "properties": {
+            "operation": {
+              "const": "normalize"
+            },
+            "parameters": {
+              "$ref": "#/$defs/NormalizeParameters"
+            }
+          }
+        },
+        {
+          "properties": {
+            "operation": {
+              "const": "decompress"
+            },
+            "parameters": {
+              "$ref": "#/$defs/DecompressParameters"
+            }
+          }
+        },
+        {
+          "properties": {
+            "operation": {
+              "const": "repeat"
+            },
+            "parameters": {
+              "$ref": "#/$defs/RepeatParameters"
+            }
+          }
+        },
+        {
+          "properties": {
+            "operation": {
+              "const": "custom"
+            },
+            "parameters": {
+              "$ref": "#/$defs/CustomParameters"
+            }
+          }
+        }
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "enum": [
+                  "encode",
+                  "decode"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "parameters": {
+                "$ref": "#/$defs/CodecParameters"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "parse"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "parameters": {
+                "$ref": "#/$defs/ParseParameters"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "serialize"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "parameters": {
+                "$ref": "#/$defs/SerializeParameters"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "extract"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "parameters": {
+                "$ref": "#/$defs/ExtractParameters"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "token-substitute"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "parameters": {
+                "$ref": "#/$defs/TokenSubstituteParameters"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "concatenate"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "parameters": {
+                "$ref": "#/$defs/ConcatenateParameters"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "separator-substitute"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "parameters": {
+                "$ref": "#/$defs/SeparatorSubstituteParameters"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "normalize"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "parameters": {
+                "$ref": "#/$defs/NormalizeParameters"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "decompress"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "parameters": {
+                "$ref": "#/$defs/DecompressParameters"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "repeat"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "parameters": {
+                "$ref": "#/$defs/RepeatParameters"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "custom"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "parameters": {
+                "$ref": "#/$defs/CustomParameters"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "PositiveBound": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 16777216
+    },
+    "CodecParameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "codec",
+        "max_output_bytes"
+      ],
+      "properties": {
+        "codec": {
+          "enum": [
+            "percent",
+            "base64",
+            "hex",
+            "utf-8"
+          ]
+        },
+        "max_output_bytes": {
+          "$ref": "#/$defs/PositiveBound"
+        }
+      }
+    },
+    "ParseParameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "grammar",
+        "maximum_input_bytes",
+        "maximum_depth"
+      ],
+      "properties": {
+        "grammar": {
+          "type": "string",
+          "minLength": 1
+        },
+        "maximum_input_bytes": {
+          "$ref": "#/$defs/PositiveBound"
+        },
+        "maximum_depth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        }
+      }
+    },
+    "SerializeParameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "format",
+        "maximum_output_bytes",
+        "maximum_depth"
+      ],
+      "properties": {
+        "format": {
+          "type": "string",
+          "minLength": 1
+        },
+        "maximum_output_bytes": {
+          "$ref": "#/$defs/PositiveBound"
+        },
+        "maximum_depth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        }
+      }
+    },
+    "ExtractParameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "selector",
+        "maximum_results",
+        "maximum_output_bytes"
+      ],
+      "properties": {
+        "selector": {
+          "type": "string",
+          "minLength": 1
+        },
+        "maximum_results": {
+          "$ref": "#/$defs/PositiveBound"
+        },
+        "maximum_output_bytes": {
+          "$ref": "#/$defs/PositiveBound"
+        }
+      }
+    },
+    "TokenSubstituteParameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "from",
+        "to",
+        "maximum_substitutions",
+        "maximum_output_bytes"
+      ],
+      "properties": {
+        "from": {
+          "type": "string",
+          "minLength": 1
+        },
+        "to": {
+          "type": "string"
+        },
+        "maximum_substitutions": {
+          "$ref": "#/$defs/PositiveBound"
+        },
+        "maximum_output_bytes": {
+          "$ref": "#/$defs/PositiveBound"
+        }
+      }
+    },
+    "ConcatenateParameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "parts",
+        "maximum_parts",
+        "maximum_output_bytes"
+      ],
+      "properties": {
+        "parts": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "maximum_parts": {
+          "$ref": "#/$defs/PositiveBound"
+        },
+        "maximum_output_bytes": {
+          "$ref": "#/$defs/PositiveBound"
+        }
+      }
+    },
+    "SeparatorSubstituteParameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "from_separators",
+        "to_separator",
+        "maximum_substitutions",
+        "maximum_output_bytes"
+      ],
+      "properties": {
+        "from_separators": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "to_separator": {
+          "type": "string"
+        },
+        "maximum_substitutions": {
+          "$ref": "#/$defs/PositiveBound"
+        },
+        "maximum_output_bytes": {
+          "$ref": "#/$defs/PositiveBound"
+        }
+      }
+    },
+    "NormalizeParameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "form",
+        "maximum_output_bytes"
+      ],
+      "properties": {
+        "form": {
+          "enum": [
+            "lowercase",
+            "uppercase",
+            "unicode-nfc",
+            "path-dot-segments"
+          ]
+        },
+        "maximum_output_bytes": {
+          "$ref": "#/$defs/PositiveBound"
+        }
+      }
+    },
+    "DecompressParameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "format",
+        "maximum_input_bytes",
+        "maximum_output_bytes"
+      ],
+      "properties": {
+        "format": {
+          "enum": [
+            "gzip",
+            "deflate"
+          ]
+        },
+        "maximum_input_bytes": {
+          "$ref": "#/$defs/PositiveBound"
+        },
+        "maximum_output_bytes": {
+          "$ref": "#/$defs/PositiveBound"
+        }
+      }
+    },
+    "RepeatParameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "count",
+        "maximum_repetitions",
+        "maximum_output_bytes"
+      ],
+      "properties": {
+        "count": {
+          "$ref": "#/$defs/PositiveBound"
+        },
+        "maximum_repetitions": {
+          "$ref": "#/$defs/PositiveBound"
+        },
+        "maximum_output_bytes": {
+          "$ref": "#/$defs/PositiveBound"
+        }
+      }
+    },
+    "CustomParameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operation_id",
+        "operation_version",
+        "parameter_schema_digest",
+        "registry_id",
+        "implementation_digest",
+        "conformance_vectors_digest",
+        "signature_ref",
+        "status",
+        "revocation_checked_at",
+        "bounds"
+      ],
+      "properties": {
+        "operation_id": {
+          "$ref": "#/$defs/StableId"
+        },
+        "operation_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "parameter_schema_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "registry_id": {
+          "$ref": "#/$defs/StableId"
+        },
+        "implementation_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "conformance_vectors_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "signature_ref": {
+          "$ref": "#/$defs/StableId"
+        },
+        "status": {
+          "enum": [
+            "active",
+            "suspended",
+            "revoked"
+          ]
+        },
+        "revocation_checked_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "bounds": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "$ref": "#/$defs/PositiveBound"
+          }
+        }
+      }
+    },
+    "CoverageAccounting": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required_obligation_count",
+        "accounted_obligation_count",
+        "unaccounted_required_obligation_count",
+        "source_member_count",
+        "represented_source_member_count",
+        "unsupported_source_member_count",
+        "unaccounted_source_member_count",
+        "required_work_item_count",
+        "disposed_work_item_count",
+        "unaccounted_required_work_item_count"
+      ],
+      "properties": {
+        "required_obligation_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "accounted_obligation_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unaccounted_required_obligation_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source_member_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "represented_source_member_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unsupported_source_member_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unaccounted_source_member_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "required_work_item_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "disposed_work_item_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unaccounted_required_work_item_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

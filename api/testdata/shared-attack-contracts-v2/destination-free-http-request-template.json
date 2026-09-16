@@ -1,0 +1,33 @@
+{
+  "modality": "http-request-template",
+  "method": "POST",
+  "path_key": "inventory-item-detail",
+  "query": [
+    {
+      "name": "probe",
+      "value": "%2527OR%25201%253D1"
+    }
+  ],
+  "headers": [
+    {
+      "name": "Content-Type",
+      "value": "application/json"
+    },
+    {
+      "name": "X-Janus-Probe",
+      "value": "cg-template-42"
+    }
+  ],
+  "cookies": [
+    {
+      "name": "experiment",
+      "value": "candidate"
+    }
+  ],
+  "body": {
+    "state": "empty",
+    "content_length": 0,
+    "content_base64": "",
+    "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

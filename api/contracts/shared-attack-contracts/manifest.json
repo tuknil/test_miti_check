@@ -1,0 +1,26 @@
+{
+  "manifest_version": 1,
+  "bundle_version": "shared-attack-contracts-phase-1@2026-09-12",
+  "digest_profile": "sha256-tab-delimited-schema-catalog-v1",
+  "bundle_digest": "sha256:a0d3c8243c63ac37e3a863bcc574d547ce84f50c111b69dfec6743ad319f4277",
+  "schemas": [
+    {
+      "$id": "https://schemas.janus.internal/contracts/attack-match-semantics/attack-match-semantics-2.0.schema.json",
+      "relative_path": "schemas/attack-match-semantics/attack-match-semantics-2.0.schema.json",
+      "sha256": "sha256:674c360348cf8a1a11c7114a311ef41294f1b34af5ae4c02b0afd10961f51e18",
+      "byte_length": 17735
+    },
+    {
+      "$id": "https://schemas.janus.internal/contracts/candidate-bundle/candidate-bundle-1.0.schema.json",
+      "relative_path": "schemas/candidate-bundle/candidate-bundle-1.0.schema.json",
+      "sha256": "sha256:c1420d128f006365bb2921d55d27b51e0a1f02075c744ff09f4c55d5e4dcf5b7",
+      "byte_length": 11126
+    },
+    {
+      "$id": "https://schemas.janus.internal/contracts/common/janus-contract-common-1.0.schema.json",
+      "relative_path": "schemas/common/janus-contract-common-1.0.schema.json",
+      "sha256": "sha256:1faf573573875103c3088e7e32f290ae0f13182d1367d46c84437c8ed1355cbc",
+      "byte_length": 37968
+    }
+  ]
+}

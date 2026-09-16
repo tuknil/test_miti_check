@@ -56,6 +56,40 @@ queries have a fixed 60-second deadline. Databricks input resolution is created
 only when a reference-only run executes; inline and local startup remain usable
 without Databricks input configuration.
 
+The WAF-first shared-contract path is additive and selected with
+`route_policy: shared-attack-contracts-v2` and `profile_id: waf-standard@2`.
+Its request contains only the authenticated CG and DG immutable locators, never
+hydrated producer bodies. It first verifies both outer producer results, then
+validates the embedded `attack-match-semantics@2.0` and
+`candidate-bundle@1.0` against the repository-local Draft 2020-12 schemas. It
+also verifies RFC 8785 digests, CG source projection and complete ancestry,
+every DG artifact and directive, exact obligation mappings, candidate and bundle
+digests, and the complete all-or-nothing application unit. The older
+`registered-waf-route-v1` and inline/upstream paths are unchanged for replay.
+
+V2 constructs every exact required `(obligation_id, input_id)` assignment. It
+applies and reads back all candidate artifacts before executing any case, then
+executes query, named-header, cookie, method, raw-body, and JSON-body HTTP inputs
+without converting absent, empty, and present body states into one another.
+Non-HTTP inputs in the WAF-first slice receive an explicit `unsupported`
+disposition. Safety stops are likewise retained as case dispositions.
+
+Destination-free `http-request-template` inputs resolve only through the
+embedded `waf-standard@2` profile. The immutable `waf-standard@1` profile remains
+available for legacy replay. The adapter may add only scheme, authority,
+and path. Each case records its template input ID and path key, resolver and
+profile IDs, immutable resolver/profile digest, and exact rendered request.
+Unknown profiles or path keys fail closed. Results add `profile_id`, complete
+`obligation_results`, the read-back `application_unit`, and
+`CoverageAccounting`; represented and unsupported source-member sets are
+disjoint and complete, and every unaccounted count is zero.
+
+Exact schemas, the offline catalog, route profile, direct CG/DG chain fixtures,
+and provenance manifests are checked into `api/contracts/shared-attack-contracts`
+and `api/testdata/shared-attack-contracts-v2`. Runtime schema resolution has no
+network loader. The approved Draft 2020-12 validator is vendored under
+`api/third_party/jsonschema`, so standalone CI has no sibling-repository dependency.
+
 Completed results are staged in PostgreSQL before external publication. The
 Databricks writer uses an insert-only `MERGE` keyed by `result_id`, then reads the
 row back and requires exact `run_id` and JSON equality. Recovery republishes the

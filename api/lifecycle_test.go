@@ -61,6 +61,26 @@ func TestCanonicalResultIntegrityExcludesIntegrityFields(t *testing.T) {
 	}
 }
 
+func TestSharedProfileCanonicalResultPayloadUsesRFC8785Integrity(t *testing.T) {
+	outcome := RunOutcome{
+		Capability: "mitigation-check", ContractID: contractID, RequestID: "request:shared-integrity",
+		RunID: "run:shared-integrity", ResultID: "result:shared-integrity", Status: statusCompleted,
+		TerminalState: stateBlocked, ProfileID: sharedV2ProfileID, EvidenceRefs: []string{},
+		CreatedAt:  time.Date(2026, 9, 14, 0, 0, 0, 0, time.UTC),
+		Accounting: &CoverageAccounting{RequiredObligationCount: 2, AccountedObligationCount: 2},
+	}
+	if err := setCanonicalIntegrity(&outcome); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := canonicalResultPayload(outcome)
+	if err != nil {
+		t.Fatalf("shared-profile canonicalResultPayload: %v", err)
+	}
+	if err := validateCanonicalResultPayload(outcome, payload); err != nil {
+		t.Fatalf("shared-profile payload validation: %v", err)
+	}
+}
+
 func validLifecycleRequest(id string) SubmitMitigationCheckRequest {
 	blocked := true
 	testBasis, _ := json.Marshal(TestBasisSpec{Kind: "http-request-attack", ProofBasis: "mitigation-discriminator", Expected: TestExpected{Blocked: &blocked}})

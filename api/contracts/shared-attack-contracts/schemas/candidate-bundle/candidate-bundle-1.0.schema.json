@@ -1,0 +1,431 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.janus.internal/contracts/candidate-bundle/candidate-bundle-1.0.schema.json",
+  "title": "Candidate bundle 1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_id",
+    "bundle_id",
+    "bundle_revision",
+    "bundle_digest",
+    "digest_profile",
+    "produced_at",
+    "semantics_binding",
+    "primary_candidate",
+    "application_unit",
+    "atomic_groups",
+    "provenance",
+    "limitations"
+  ],
+  "properties": {
+    "contract_id": {
+      "const": "candidate-bundle@1.0"
+    },
+    "bundle_id": {
+      "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/StableId"
+    },
+    "bundle_revision": {
+      "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/Revision"
+    },
+    "bundle_digest": {
+      "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/Digest"
+    },
+    "digest_profile": {
+      "const": "rfc8785-sha256-exclude-bundle_digest-and-candidate_digest-v1"
+    },
+    "produced_at": {
+      "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/Timestamp"
+    },
+    "semantics_binding": {
+      "$ref": "#/$defs/SemanticsBinding"
+    },
+    "primary_candidate": {
+      "$ref": "#/$defs/Candidate"
+    },
+    "application_unit": {
+      "$ref": "#/$defs/ApplicationUnit"
+    },
+    "atomic_groups": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/AtomicGroup"
+      }
+    },
+    "provenance": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/Provenance"
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "SemanticsBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_id",
+        "semantics_id",
+        "semantics_revision",
+        "semantics_digest",
+        "locator"
+      ],
+      "properties": {
+        "contract_id": {
+          "const": "attack-match-semantics@2.0"
+        },
+        "semantics_id": {
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/StableId"
+        },
+        "semantics_revision": {
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/Revision"
+        },
+        "semantics_digest": {
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/Digest"
+        },
+        "locator": {
+          "description": "Immutable locator for the enclosing final check-generation@2.1 result containing the single embedded semantics document.",
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/ImmutableLocator"
+        }
+      }
+    },
+    "Candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidate_id",
+        "candidate_revision",
+        "candidate_digest",
+        "selected_control_class",
+        "intent",
+        "artifacts",
+        "directives",
+        "obligation_mappings",
+        "assumptions",
+        "limitations"
+      ],
+      "properties": {
+        "candidate_id": {
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/StableId"
+        },
+        "candidate_revision": {
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/Revision"
+        },
+        "candidate_digest": {
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/Digest"
+        },
+        "selected_control_class": {
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/ControlClass"
+        },
+        "intent": {
+          "type": "string",
+          "minLength": 1
+        },
+        "artifacts": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/Artifact"
+          }
+        },
+        "directives": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Directive"
+          }
+        },
+        "obligation_mappings": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/Obligation"
+          }
+        },
+        "assumptions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "Artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_id",
+        "order",
+        "role",
+        "kind",
+        "content",
+        "application_group_ref",
+        "depends_on"
+      ],
+      "properties": {
+        "artifact_id": {
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/StableId"
+        },
+        "order": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "role": {
+          "enum": [
+            "primary",
+            "prerequisite",
+            "supporting",
+            "cleanup"
+          ]
+        },
+        "kind": {
+          "enum": [
+            "abstract-pattern",
+            "match-rule",
+            "policy-fragment",
+            "configuration-fragment",
+            "indicator-set",
+            "scripted-harness",
+            "other"
+          ]
+        },
+        "content": {
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/ImmutableLocator"
+        },
+        "application_group_ref": {
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/TypedRef"
+        },
+        "depends_on": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/TypedRef"
+          }
+        }
+      }
+    },
+    "Directive": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "directive_id",
+        "kind",
+        "artifact_ref",
+        "value",
+        "required"
+      ],
+      "properties": {
+        "directive_id": {
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/StableId"
+        },
+        "kind": {
+          "enum": [
+            "placement",
+            "ordering",
+            "normalization",
+            "action",
+            "exception",
+            "observation",
+            "cleanup"
+          ]
+        },
+        "artifact_ref": {
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/TypedRef"
+        },
+        "value": {
+          "type": "string",
+          "minLength": 1
+        },
+        "required": {
+          "type": "boolean"
+        }
+      }
+    },
+    "Obligation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "obligation_id",
+        "semantics_refs",
+        "source_member_refs",
+        "artifact_refs",
+        "directive_refs",
+        "coverage"
+      ],
+      "properties": {
+        "obligation_id": {
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/StableId"
+        },
+        "semantics_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/TypedRef"
+          }
+        },
+        "source_member_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/TypedRef"
+          }
+        },
+        "artifact_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/TypedRef"
+          }
+        },
+        "directive_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/TypedRef"
+          }
+        },
+        "coverage": {
+          "enum": [
+            "exact",
+            "equivalent",
+            "narrower"
+          ]
+        },
+        "coverage_gap": {
+          "type": "object"
+        }
+      }
+    },
+    "ApplicationUnit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "application_unit_id",
+        "artifact_refs",
+        "apply",
+        "rollback",
+        "remove",
+        "readback"
+      ],
+      "properties": {
+        "application_unit_id": {
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/StableId"
+        },
+        "artifact_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/TypedRef"
+          }
+        },
+        "apply": {
+          "const": "all-or-nothing"
+        },
+        "rollback": {
+          "const": "all-or-nothing"
+        },
+        "remove": {
+          "const": "all-or-nothing"
+        },
+        "readback": {
+          "const": "verify-every-artifact-or-rollback"
+        }
+      }
+    },
+    "AtomicGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "atomic_group_id",
+        "artifact_refs",
+        "apply",
+        "rollback",
+        "remove",
+        "readback"
+      ],
+      "properties": {
+        "atomic_group_id": {
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/StableId"
+        },
+        "artifact_refs": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/TypedRef"
+          }
+        },
+        "apply": {
+          "const": "all-or-nothing"
+        },
+        "rollback": {
+          "const": "all-or-nothing"
+        },
+        "remove": {
+          "const": "all-or-nothing"
+        },
+        "readback": {
+          "const": "verify-group-or-rollback"
+        }
+      }
+    },
+    "Provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "step_id",
+        "order",
+        "source",
+        "actor_identity",
+        "actor_version",
+        "actor_digest",
+        "input_digests",
+        "output_digest"
+      ],
+      "properties": {
+        "step_id": {
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/StableId"
+        },
+        "order": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source": {
+          "enum": [
+            "compiler",
+            "model",
+            "repair",
+            "fallback"
+          ]
+        },
+        "actor_identity": {
+          "type": "string"
+        },
+        "actor_version": {
+          "type": "string"
+        },
+        "actor_digest": {
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/Digest"
+        },
+        "input_digests": {
+          "type": "array",
+          "items": {
+            "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/Digest"
+          }
+        },
+        "output_digest": {
+          "$ref": "../common/janus-contract-common-1.0.schema.json#/$defs/Digest"
+        }
+      }
+    }
+  }
+}
