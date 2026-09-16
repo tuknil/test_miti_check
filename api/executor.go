@@ -57,9 +57,10 @@ type RunOutcome struct {
 	Expected  Expected `json:"expected"`
 	Actual    Actual   `json:"actual"`
 	Substrate SubInfo  `json:"substrate"`
-	// Candidate and TestBasis carry the actual mitigation rule and the test that
-	// were run, so a mitigation_check row is self-contained — downstream consumers
-	// need not query the upstream tables the rule/test were sourced from.
+	// Candidate/TestBasis (the resolved rule and test) and the diagnostics
+	// (Steps/ProseSummary/Limitations) are part of the canonical result stored in
+	// Databricks (so a consumer can resolve the rule/test via result_ref), but are
+	// stripped from the API result response — see apiResultKeysToHide.
 	Candidate     *CandidateSpec `json:"candidate,omitempty"`
 	TestBasis     *TestBasisSpec `json:"test_basis,omitempty"`
 	Steps         []string       `json:"steps"`
@@ -271,8 +272,10 @@ func executeScenario(ctx context.Context, req SubmitMitigationCheckRequest, runI
 		out.TerminalState = stateNotBlocked
 	}
 
-	// 4. Actual vs expected.
-	out.Match = out.Actual.Blocked == out.Expected.Blocked
+	// 4. A match requires an actual block. If the request was not blocked, match is
+	// false regardless of the expected outcome (a not-blocked result never counts as
+	// a match); when blocked, it must still agree with the expected outcome.
+	out.Match = out.Actual.Blocked && (out.Actual.Blocked == out.Expected.Blocked)
 	out.ProseSummary = summarize(out)
 	if test.ProofBasis == "mitigation-discriminator" && out.TerminalState == stateBlocked {
 		out.Limitations = append(out.Limitations, "indirect proof: only discriminator behavior was proven blocked (LLD §7.3)")

@@ -228,6 +228,29 @@ func handleRunStatus(w http.ResponseWriter, r *http.Request, id string) {
 	}
 	writeJSON(w, http.StatusOK, publicRunStatus(status))
 }
+
+// apiResultKeysToHide are fields kept in the canonical result (Databricks, via
+// result_ref) but not surfaced in the API result response: the embedded rule/test
+// and the execution diagnostics. The response carries envelope + verdict.
+var apiResultKeysToHide = []string{"candidate", "test_basis", "steps", "prose_summary", "limitations"}
+
+// apiResultView strips the hidden keys from the canonical result payload for the
+// API response. On any parse error it returns the payload unchanged.
+func apiResultView(payload []byte) []byte {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &m); err != nil {
+		return payload
+	}
+	for _, k := range apiResultKeysToHide {
+		delete(m, k)
+	}
+	out, err := json.Marshal(m)
+	if err != nil {
+		return payload
+	}
+	return out
+}
+
 func handleRunResult(w http.ResponseWriter, r *http.Request, id string) {
 	run, err := store.GetDurable(r.Context(), id)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -249,7 +272,7 @@ func handleRunResult(w http.ResponseWriter, r *http.Request, id string) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(run.ResultPayload)
+		_, _ = w.Write(apiResultView(run.ResultPayload))
 		return
 	}
 	writeJSON(w, http.StatusOK, publicStatus(run))

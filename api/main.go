@@ -226,8 +226,8 @@ func main() {
 	go worker.Run(workerCtx)
 	go callbackDispatcher.Run(workerCtx)
 
-	// On SIGINT/SIGTERM (docker stop) stop accepting requests, then fall through
-	// so main can shut the embedded Postgres down cleanly before exiting.
+	// On SIGINT/SIGTERM (docker stop) stop accepting new requests and drain
+	// in-flight ones, then fall through to close the db pool cleanly.
 	go func() {
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
@@ -241,7 +241,7 @@ func main() {
 	log.Printf("mitigation-check API listening on %s", srv.Addr)
 	err = srv.ListenAndServe()
 	stopWorkers()
-	store.Close() // synchronous: guarantees postgres stops cleanly before exit
+	store.Close() // close the connection pool after in-flight requests drain
 	dbx.Close()
 	dbxReader.Close()
 	if err != nil && err != http.ErrServerClosed {
