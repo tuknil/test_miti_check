@@ -1625,6 +1625,7 @@ func sharedRouteApplies(bound, actual sharedRouteBinding) bool {
 }
 
 func (w sharedPreparedWAF) evaluate(route sharedRouteBinding, request sharedHTTPInput, body []byte) (bool, string, error) {
+	var evaluationErr error
 	for _, alternative := range w.alternatives {
 		if alternative.Route != nil && !sharedRouteApplies(*alternative.Route, route) {
 			continue
@@ -1635,7 +1636,11 @@ func (w sharedPreparedWAF) evaluate(route sharedRouteBinding, request sharedHTTP
 			rule := w.rules[id]
 			values, err := sharedCarrierValues(rule, request, body)
 			if err != nil {
-				return false, "", err
+				if evaluationErr == nil {
+					evaluationErr = err
+				}
+				matched = false
+				break
 			}
 			ruleMatched := false
 			for _, value := range values {
@@ -1657,6 +1662,9 @@ func (w sharedPreparedWAF) evaluate(route sharedRouteBinding, request sharedHTTP
 		if matched {
 			return true, last, nil
 		}
+	}
+	if evaluationErr != nil {
+		return false, "", evaluationErr
 	}
 	return false, "", nil
 }

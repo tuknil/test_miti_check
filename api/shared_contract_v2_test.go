@@ -448,6 +448,23 @@ func TestStructuredBodySelectorRejectsMalformedJSON(t *testing.T) {
 	}
 }
 
+func TestStructuredBodyErrorDoesNotMaskMatchingRawAlternative(t *testing.T) {
+	waf := sharedPreparedWAF{
+		rules: map[string]sharedPreparedRule{
+			"structured": {ID: "structured-rule", Carrier: "body", Name: "/input", Pattern: regexpMust(t, `^attack$`)},
+			"raw":        {ID: "raw-rule", Carrier: "body", Pattern: regexpMust(t, `^\$\{jndi:ldap://127\.0\.0\.1:1389/a\}$`)},
+		},
+		alternatives: []sharedPreparedAlternative{
+			{ComponentIDs: []string{"structured"}},
+			{ComponentIDs: []string{"raw"}},
+		},
+	}
+	matched, ruleID, err := waf.evaluate(sharedRouteBinding{}, sharedHTTPInput{}, []byte(`${jndi:ldap://127.0.0.1:1389/a}`))
+	if err != nil || !matched || ruleID != "raw-rule" {
+		t.Fatalf("matched=%v ruleID=%q err=%v", matched, ruleID, err)
+	}
+}
+
 func TestRouteBoundWAFDoesNotApplyPayloadRuleOnAnotherRoute(t *testing.T) {
 	rule := sharedPreparedRule{ID: "body-rule", Carrier: "body", Pattern: regexpMust(t, "attack")}
 	bound := sharedRouteBinding{Kind: "opaque-path-key", Method: "POST", PathKey: "public/submit.php"}
