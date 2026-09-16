@@ -203,6 +203,16 @@ func (w *RunWorker) executeOne(parent context.Context, run DurableRun) {
 		}
 		staged, stageErr := w.store.StageOutcome(parent, run.RunID, w.workerID, run.LeaseToken, outcome, payload)
 		if stageErr != nil || !staged {
+			if stageErr == nil {
+				requested, owned, heartbeatErr := w.store.Heartbeat(parent, run.RunID, w.workerID, run.LeaseToken, w.lease)
+				if heartbeatErr == nil && owned && requested {
+					written, markErr := w.store.MarkCanceled(parent, run.RunID, w.workerID, run.LeaseToken)
+					logLifecycle("run_canceled_before_staging", run, map[string]any{
+						"transition_written": written, "transition_error": errorString(markErr),
+					})
+					return
+				}
+			}
 			detail := errorString(stageErr)
 			if detail == "" {
 				detail = "lease no longer owned"
