@@ -57,8 +57,10 @@ type RunOutcome struct {
 	Expected  Expected `json:"expected"`
 	Actual    Actual   `json:"actual"`
 	Substrate SubInfo  `json:"substrate"`
-	// Candidate/TestBasis and execution diagnostics remain part of the exact
-	// canonical result returned by the result endpoint and persisted in Databricks.
+	// Candidate/TestBasis and the execution diagnostics remain part of the exact
+	// canonical result persisted in Databricks (resolved by a consumer via
+	// result_ref), but are stripped from the API result response — see
+	// apiResultKeysToHide. The response carries envelope + verdict.
 	Candidate     *CandidateSpec `json:"candidate,omitempty"`
 	TestBasis     *TestBasisSpec `json:"test_basis,omitempty"`
 	Steps         []string       `json:"steps"`
