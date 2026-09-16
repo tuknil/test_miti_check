@@ -30,6 +30,11 @@ const (
 	checkGenerationContentProfile = "rfc8785-sha256-exclude-content_digest-v1"
 )
 
+var (
+	errSharedJSONPointerMemberAbsent = errors.New("JSON pointer member is absent")
+	errSharedJSONPointerIndexInvalid = errors.New("JSON pointer index is invalid")
+)
+
 type sharedTypedRef struct {
 	Kind  string `json:"kind"`
 	Scope string `json:"scope"`
@@ -1558,12 +1563,12 @@ func resolveSharedJSONPointer(root any, pointer string) (any, error) {
 			var ok bool
 			current, ok = typed[token]
 			if !ok {
-				return nil, errors.New("JSON pointer member is absent")
+				return nil, errSharedJSONPointerMemberAbsent
 			}
 		case []any:
 			var index int
 			if _, err := fmt.Sscanf(token, "%d", &index); err != nil || index < 0 || index >= len(typed) {
-				return nil, errors.New("JSON pointer index is invalid")
+				return nil, errSharedJSONPointerIndexInvalid
 			}
 			current = typed[index]
 		default:
@@ -1628,7 +1633,10 @@ func (w sharedPreparedWAF) evaluate(route sharedRouteBinding, request sharedHTTP
 		last := ""
 		for _, id := range alternative.ComponentIDs {
 			rule := w.rules[id]
-			values := sharedCarrierValues(rule, request, body)
+			values, err := sharedCarrierValues(rule, request, body)
+			if err != nil {
+				return false, "", err
+			}
 			ruleMatched := false
 			for _, value := range values {
 				transformed, err := applySharedWAFTransforms([]byte(value), rule.Transformations)
@@ -1652,22 +1660,40 @@ func (w sharedPreparedWAF) evaluate(route sharedRouteBinding, request sharedHTTP
 	}
 	return false, "", nil
 }
-func sharedCarrierValues(rule sharedPreparedRule, request sharedHTTPInput, body []byte) []string {
+func sharedCarrierValues(rule sharedPreparedRule, request sharedHTTPInput, body []byte) ([]string, error) {
 	switch rule.Carrier {
 	case "query":
-		return namedHTTPValues(request.Query, rule.Name)
+		return namedHTTPValues(request.Query, rule.Name), nil
 	case "header":
-		return namedHTTPValuesFold(request.Headers, rule.Name)
+		return namedHTTPValuesFold(request.Headers, rule.Name), nil
 	case "cookie":
-		return namedHTTPValues(request.Cookies, rule.Name)
+		return namedHTTPValues(request.Cookies, rule.Name), nil
 	case "body":
-		return []string{string(body)}
+		if rule.Name == "" {
+			return []string{string(body)}, nil
+		}
+		var document any
+		if err := decodeStrictJSON(body, &document); err != nil {
+			return nil, fmt.Errorf("decode structured body: %w", err)
+		}
+		value, err := resolveSharedJSONPointer(document, rule.Name)
+		if err != nil {
+			if errors.Is(err, errSharedJSONPointerMemberAbsent) || errors.Is(err, errSharedJSONPointerIndexInvalid) {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("resolve structured body selector: %w", err)
+		}
+		text, ok := value.(string)
+		if !ok {
+			return nil, nil
+		}
+		return []string{text}, nil
 	case "path":
-		return []string{request.Path}
+		return []string{request.Path}, nil
 	case "method":
-		return []string{request.Method}
+		return []string{request.Method}, nil
 	default:
-		return nil
+		return nil, nil
 	}
 }
 func namedHTTPValues(fields []sharedHTTPField, name string) []string {
