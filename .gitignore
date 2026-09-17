@@ -4,6 +4,7 @@ api/data/
 # Local secrets / env (never commit tokens)
 .env
 *.env
+!.env.example
 
 # Editor swap files
 *.swp
