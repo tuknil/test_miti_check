@@ -13,9 +13,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
+	"strings"
 	"time"
-
-	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 // RunRecord is one ledger entry: the immutable request and its executed result.
@@ -43,12 +43,14 @@ type RunStore struct {
 	db *sql.DB
 }
 
-// NewRunStore connects to Postgres at dsn, waiting for it to accept connections
-// (the db container may still be starting), then ensures the schema exists.
-func NewRunStore(dsn string) (*RunStore, error) {
-	db, err := sql.Open("pgx", dsn)
+// NewRunStore opens Postgres (password or Entra ID, per DATABASE_AUTH_MODE),
+// waits for it to accept connections, then ensures the schema exists — unless
+// DATABASE_MIGRATION_MODE=external, in which case migrations are managed outside
+// the app and the in-app schema creation is skipped.
+func NewRunStore() (*RunStore, error) {
+	db, err := openLedgerDB()
 	if err != nil {
-		return nil, fmt.Errorf("open db: %w", err)
+		return nil, err
 	}
 	db.SetMaxOpenConns(8)
 	db.SetConnMaxLifetime(30 * time.Minute)
@@ -66,22 +68,26 @@ func NewRunStore(dsn string) (*RunStore, error) {
 		return nil, fmt.Errorf("postgres not reachable: %w", pingErr)
 	}
 
-	if _, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS mitigation_check_run (
-			run_id         TEXT        PRIMARY KEY,
-			result_id      TEXT        NOT NULL,
-			terminal_state TEXT        NOT NULL,
-			match          BOOLEAN     NOT NULL,
-			created_at     TIMESTAMPTZ NOT NULL,
-			request        JSONB       NOT NULL,
-			response       JSONB       NOT NULL
-		)`); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("create schema: %w", err)
-	}
-	if err := migrateLifecycle(db); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("migrate lifecycle schema: %w", err)
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("DATABASE_MIGRATION_MODE")), "external") {
+		log.Printf("ledger: DATABASE_MIGRATION_MODE=external — skipping in-app schema migration")
+	} else {
+		if _, err := db.Exec(`
+			CREATE TABLE IF NOT EXISTS mitigation_check_run (
+				run_id         TEXT        PRIMARY KEY,
+				result_id      TEXT        NOT NULL,
+				terminal_state TEXT        NOT NULL,
+				match          BOOLEAN     NOT NULL,
+				created_at     TIMESTAMPTZ NOT NULL,
+				request        JSONB       NOT NULL,
+				response       JSONB       NOT NULL
+			)`); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("create schema: %w", err)
+		}
+		if err := migrateLifecycle(db); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("migrate lifecycle schema: %w", err)
+		}
 	}
 
 	s := &RunStore{db: db}

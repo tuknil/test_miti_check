@@ -181,11 +181,7 @@ func main() {
 		return
 	}
 
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		dsn = "postgres://mc:mc@localhost:5432/mitigation?sslmode=disable"
-	}
-	s, err := NewRunStore(dsn)
+	s, err := NewRunStore()
 	if err != nil {
 		log.Fatalf("could not open run ledger: %v", err)
 	}

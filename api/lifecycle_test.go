@@ -140,7 +140,8 @@ func integrationStore(t *testing.T) *RunStore {
 	if dsn == "" {
 		t.Skip("MC_TEST_DATABASE_URL is not configured")
 	}
-	s, err := NewRunStore(dsn)
+	t.Setenv("DATABASE_URL", dsn)
+	s, err := NewRunStore()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +303,7 @@ func TestPostgresCompletionIsImmutable(t *testing.T) {
 	if err != nil || written {
 		t.Fatalf("terminal result was mutable: written=%t err=%v", written, err)
 	}
-	reopened, err := NewRunStore(os.Getenv("MC_TEST_DATABASE_URL"))
+	reopened, err := NewRunStore() // DATABASE_URL was set by integrationStore
 	if err != nil {
 		t.Fatal(err)
 	}
