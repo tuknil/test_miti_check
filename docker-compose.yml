@@ -33,6 +33,19 @@ services:
       PORT: "8137"
       GODEBUG: x509negativeserial=1
       DATABASE_URL: postgres://mc:mc@db:5432/mitigation?sslmode=disable
+      # Ledger DB auth. Unset (default) uses DATABASE_URL above (password, local db
+      # container). Set DATABASE_AUTH_MODE=entra to connect to Azure Database for
+      # PostgreSQL with a Microsoft Entra ID token (reuses the AZURE_* creds below);
+      # then provide DATABASE_HOST/NAME/USER (PORT/SSL_MODE default to 5432 /
+      # verify-full). DATABASE_MIGRATION_MODE=external skips in-app schema creation.
+      DATABASE_AUTH_MODE: ${DATABASE_AUTH_MODE:-}
+      DATABASE_HOST: ${DATABASE_HOST:-}
+      DATABASE_PORT: ${DATABASE_PORT:-}
+      DATABASE_NAME: ${DATABASE_NAME:-}
+      DATABASE_USER: ${DATABASE_USER:-}
+      DATABASE_SSL_MODE: ${DATABASE_SSL_MODE:-}
+      DATABASE_MIGRATION_MODE: ${DATABASE_MIGRATION_MODE:-}
+      AZURE_POSTGRES_TOKEN_SCOPE: ${AZURE_POSTGRES_TOKEN_SCOPE:-}
       MC_SUBSTRATE_NETWORK: mitigation-net
       # Azure ACI execution mode (optional).
       AZURE_SUBSCRIPTION_ID: ${AZURE_SUBSCRIPTION_ID:-}
