@@ -33,6 +33,11 @@ const upstreamContractID = "defense-generation@1.0"
 //go:embed openapi.yaml
 var openapiSpec []byte
 
+// openapiServed is the spec actually served at /openapi.yaml (and used by Swagger
+// UI's "Try it out"): openapiSpec with the servers URL replaced by API_ENDPOINT
+// when set, so it targets the deployed API instead of localhost. Set in main().
+var openapiServed = openapiSpec
+
 // maxBodyBytes bounds request payloads at the API edge (LLD §3.4, §13.7).
 const maxBodyBytes = 64 * 1024
 
@@ -202,6 +207,8 @@ func main() {
 		log.Printf("input contract: UPSTREAM mode (rule read from Databricks via upstream_inputs)")
 	}
 
+	applyOpenAPIEndpoint()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/mitigation-check-runs", withCORS(handleRunsCollection))
 	mux.HandleFunc("/v1/mitigation-check-runs/", withCORS(handleRunItem))
@@ -288,9 +295,20 @@ func runScenarioCLI(path string) {
 	_ = enc.Encode(out)
 }
 
+// applyOpenAPIEndpoint substitutes the OpenAPI servers URL from API_ENDPOINT so
+// Swagger UI's "Try it out" hits the deployed API. No-op when unset.
+func applyOpenAPIEndpoint() {
+	ep := strings.TrimSpace(os.Getenv("API_ENDPOINT"))
+	if ep == "" {
+		return
+	}
+	openapiServed = bytes.Replace(openapiSpec, []byte("http://localhost:8137"), []byte(ep), 1)
+	log.Printf("openapi: servers url = %s (from API_ENDPOINT)", ep)
+}
+
 func handleOpenAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/yaml")
-	_, _ = w.Write(openapiSpec)
+	_, _ = w.Write(openapiServed)
 }
 
 // handleDocs serves a Swagger UI page pointed at the embedded spec. The Swagger

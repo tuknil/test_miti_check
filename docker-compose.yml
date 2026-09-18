@@ -32,6 +32,9 @@ services:
     environment:
       PORT: "8137"
       GODEBUG: x509negativeserial=1
+      # Base URL advertised in the OpenAPI spec so Swagger UI ("/docs" → Try it out)
+      # targets the deployed API instead of localhost. Unset keeps localhost:8137.
+      API_ENDPOINT: ${API_ENDPOINT:-}
       DATABASE_URL: postgres://mc:mc@db:5432/mitigation?sslmode=disable
       # Ledger DB auth. Unset (default) uses DATABASE_URL above (password, local db
       # container). Set DATABASE_AUTH_MODE=entra to connect to Azure Database for
