@@ -140,6 +140,7 @@ func integrationStore(t *testing.T) *RunStore {
 	if dsn == "" {
 		t.Skip("MC_TEST_DATABASE_URL is not configured")
 	}
+	t.Setenv("POSTGRES_ENV", "DEV") // use the DATABASE_URL client, not the UMI default
 	t.Setenv("DATABASE_URL", dsn)
 	s, err := NewRunStore()
 	if err != nil {

@@ -1,15 +1,19 @@
 package main
 
-// db.go opens the Postgres connection for the run ledger. Two auth modes:
+// db.go opens the Postgres connection for the run ledger.
 //
-//   - DATABASE_AUTH_MODE=entra: Azure Database for PostgreSQL with Microsoft
-//     Entra ID. The connection is built from DATABASE_HOST/PORT/NAME/USER/SSL_MODE
-//     and the password is a short-lived Entra ID access token acquired per
-//     connection (pgx BeforeConnect), so it is always fresh. The token is obtained
-//     from an explicit service principal (AZURE_TENANT_ID/CLIENT_ID/CLIENT_SECRET)
-//     when set, else DefaultAzureCredential (e.g. a managed identity on Azure).
+// The top-level selector is POSTGRES_ENV:
 //
-//   - anything else (default): DATABASE_URL with a static password (local/dev).
+//   - POSTGRES_ENV=PROD (the default): Azure Database for PostgreSQL via a
+//     User-Assigned Managed Identity (UMI). See umi.go — driven by
+//     PG_HOST/PG_DATABASE/PG_USER/AZURE_CLIENT_ID.
+//
+//   - POSTGRES_ENV=DEV: the DATABASE_URL client (static password, local/dev).
+//     Within DEV, DATABASE_AUTH_MODE=entra additionally selects Azure Postgres
+//     with a service-principal / DefaultAzureCredential Entra ID token, built
+//     from DATABASE_HOST/PORT/NAME/USER/SSL_MODE (the password is a short-lived
+//     token acquired per connection via pgx BeforeConnect); anything else uses
+//     DATABASE_URL directly.
 
 import (
 	"context"
@@ -29,11 +33,21 @@ import (
 // PostgreSQL when AZURE_POSTGRES_TOKEN_SCOPE is not set.
 const azurePostgresDefaultScope = "https://ossrdbms-aad.database.windows.net/.default"
 
-// openLedgerDB opens the ledger database according to DATABASE_AUTH_MODE.
+// openLedgerDB opens the ledger database according to POSTGRES_ENV (default PROD).
 func openLedgerDB() (*sql.DB, error) {
+	// PROD (default) → UMI. DEV → DATABASE_URL (and, within DEV, the entra path).
+	if !strings.EqualFold(strings.TrimSpace(os.Getenv("POSTGRES_ENV")), "DEV") {
+		return openUMIPostgres()
+	}
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("DATABASE_AUTH_MODE")), "entra") {
 		return openEntraPostgres()
 	}
+	return openDatabaseURL()
+}
+
+// openDatabaseURL opens Postgres from DATABASE_URL with a static password
+// (local/dev). This is the long-standing DATABASE_URL-based client.
+func openDatabaseURL() (*sql.DB, error) {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
 		dsn = "postgres://mc:mc@localhost:5432/mitigation?sslmode=disable"

@@ -33,7 +33,18 @@ services:
       PORT: "8137"
       GODEBUG: x509negativeserial=1
       DATABASE_URL: postgres://mc:mc@db:5432/mitigation?sslmode=disable
-      # Ledger DB auth. Unset (default) uses DATABASE_URL above (password, local db
+      # Ledger DB selector. POSTGRES_ENV=PROD (code default) connects to Azure
+      # Postgres via a User-Assigned Managed Identity (UMI) using PG_HOST/PG_DATABASE/
+      # PG_USER/AZURE_CLIENT_ID. Compose defaults to DEV so the bundled `db`
+      # container works out of the box; override to PROD when running on Azure.
+      POSTGRES_ENV: ${POSTGRES_ENV:-DEV}
+      # PROD (UMI) settings — only used when POSTGRES_ENV=PROD.
+      PG_HOST: ${PG_HOST:-}
+      PG_DATABASE: ${PG_DATABASE:-}
+      PG_USER: ${PG_USER:-}
+      PG_PORT: ${PG_PORT:-}
+      PG_SSL_MODE: ${PG_SSL_MODE:-}
+      # DEV ledger auth. Default uses DATABASE_URL above (password, local db
       # container). Set DATABASE_AUTH_MODE=entra to connect to Azure Database for
       # PostgreSQL with a Microsoft Entra ID token (reuses the AZURE_* creds below);
       # then provide DATABASE_HOST/NAME/USER (PORT/SSL_MODE default to 5432 /
