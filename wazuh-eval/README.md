@@ -1,11 +1,19 @@
 # wazuh-eval
 
-A standalone, dependency-free Go program that takes **any Wazuh EDR telemetry**
-(a decoded event) plus a **Wazuh EDR rule** (ruleset XML), evaluates the rule's
-conditions against the event, and reports whether the rule **matches**.
+A standalone, dependency-free Go program that evaluates a defense-generation
+candidate's rule against an event and reports whether it **matches**:
+
+- **EDR** — a **Wazuh rule** (ruleset XML) against decoded telemetry.
+- **WAF** — a **ModSecurity `SecRule`** against an HTTP request.
 
 It answers one question per rule: *given this event, would this rule fire?* — with
 a per-condition breakdown so you can see exactly which condition passed or failed.
+
+Given a defense-generation candidate, it routes to the right evaluator by
+**candidate kind** (`selected_control_class` / `candidate_kind` / `artifact_type`).
+The WAF path reuses the mitigation-check in-process WAF evaluator (api's
+`executor.go`) so a WAF candidate is judged here exactly as the production
+in-memory substrate judges it.
 
 Standard library only (`encoding/xml`, `encoding/json`, `regexp`, `net`, `flag`).
 
@@ -16,7 +24,31 @@ cd wazuh-eval
 go build -o wazuh-eval .
 ```
 
-## Usage
+## Candidate mode (EDR + WAF)
+
+Pass a defense-generation candidate (a full result document with a
+`primary_candidate`, or a bare candidate object) and an event; the tool picks the
+evaluator by candidate kind:
+
+```bash
+# Auto-routes to EDR (Wazuh) or WAF (ModSecurity) by candidate kind:
+wazuh-eval -candidate candidate.json -event event.json
+cat event.json | wazuh-eval -candidate candidate.json -json
+```
+
+| Candidate | `selected_control_class` / `candidate_kind` / `artifact_type` | Evaluator | Event is |
+|-----------|---------------------------------------------------------------|-----------|----------|
+| EDR | `edr` / `endpoint-detection-rule` / `wazuh-rule` | Wazuh rule engine (this module) | decoded telemetry JSON |
+| WAF | `waf` / `fast-waf-rule` / `modsecurity-rule` | ModSecurity `SecRule` engine (reused from api) | an HTTP request JSON |
+
+`artifact_content` is taken straight from the candidate (the outer JSON parse
+un-escapes it). For WAF, `matched=true` means the `SecRule` fired → the request
+would be **blocked**.
+
+**HTTP request JSON** (WAF): `{"method","path","headers","body"}` — `path` may
+include a `?query` (aliases: `uri`/`url` → `path`, `request_body` → `body`).
+
+## EDR direct mode
 
 ```bash
 # Event from a JSON file

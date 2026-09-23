@@ -31,43 +31,36 @@ func run(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 	fs := flag.NewFlagSet("wazuh-eval", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
-		rulePath  = fs.String("rule", "", "path to Wazuh rule XML file (required)")
-		eventPath = fs.String("event", "", "path to decoded telemetry JSON file (default: stdin)")
-		logLine   = fs.String("log", "", "raw log line to evaluate instead of a JSON event")
-		ruleID    = fs.String("id", "", "evaluate only the rule with this id (default: all rules in the file)")
-		asJSON    = fs.Bool("json", false, "emit the result as JSON")
+		rulePath      = fs.String("rule", "", "path to a Wazuh rule XML file (EDR-only, direct mode)")
+		candidatePath = fs.String("candidate", "", "path to a defense-generation candidate/result JSON; routes to the EDR or WAF evaluator by candidate kind")
+		eventPath     = fs.String("event", "", "path to the event JSON: decoded telemetry (EDR) or an HTTP request (WAF); default stdin")
+		logLine       = fs.String("log", "", "raw log line to evaluate instead of a JSON event (EDR only)")
+		ruleID        = fs.String("id", "", "evaluate only the rule with this id (default: all rules)")
+		asJSON        = fs.Bool("json", false, "emit the result as JSON")
 	)
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "wazuh-eval — evaluate a Wazuh rule against decoded telemetry.")
+		fmt.Fprintln(stderr, "wazuh-eval — evaluate an EDR (Wazuh) or WAF (ModSecurity) rule against an event.")
 		fmt.Fprintln(stderr, "\nUsage:")
-		fmt.Fprintln(stderr, "  wazuh-eval -rule rules.xml -event event.json")
-		fmt.Fprintln(stderr, "  cat event.json | wazuh-eval -rule rules.xml")
-		fmt.Fprintln(stderr, "  wazuh-eval -rule rules.xml -log '<raw log line>'")
+		fmt.Fprintln(stderr, "  # Candidate mode — auto-routes to EDR or WAF by candidate kind:")
+		fmt.Fprintln(stderr, "  wazuh-eval -candidate candidate.json -event event.json")
+		fmt.Fprintln(stderr, "  # EDR direct mode (Wazuh rule XML):")
+		fmt.Fprintln(stderr, "  wazuh-eval -rule rules.xml -event telemetry.json")
+		fmt.Fprintln(stderr, "  cat telemetry.json | wazuh-eval -rule rules.xml")
 		fmt.Fprintln(stderr, "\nFlags:")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if *rulePath == "" {
-		fmt.Fprintln(stderr, "error: -rule is required")
+	if (*rulePath == "") == (*candidatePath == "") {
+		fmt.Fprintln(stderr, "error: provide exactly one of -rule or -candidate")
 		fs.Usage()
 		return 2
 	}
 
-	ruleData, err := os.ReadFile(*rulePath)
-	if err != nil {
-		fmt.Fprintf(stderr, "error: reading rule file: %v\n", err)
-		return 2
-	}
-	rules, err := ParseRules(ruleData)
-	if err != nil {
-		fmt.Fprintf(stderr, "error: %v\n", err)
-		return 2
-	}
-
-	// Load the event: -log wins, else -event file, else stdin.
+	// Load the event bytes: -log wins, else -event file, else stdin.
 	var eventBytes []byte
+	var err error
 	switch {
 	case *logLine != "":
 		eventBytes = []byte(*logLine)
@@ -89,9 +82,50 @@ func run(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 			return 2
 		}
 	}
+
+	// Candidate mode: classify the candidate and route to EDR or WAF.
+	if *candidatePath != "" {
+		candData, err := os.ReadFile(*candidatePath)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: reading candidate file: %v\n", err)
+			return 2
+		}
+		cand, err := LoadCandidate(candData)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 2
+		}
+		report, err := EvaluateCandidate(cand, eventBytes)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 2
+		}
+		if *asJSON {
+			if code := encodeJSON(stdout, stderr, report); code != 0 {
+				return code
+			}
+		} else {
+			printCandidateReport(stdout, report)
+		}
+		if report.Matched {
+			return 0
+		}
+		return 1
+	}
+
+	// EDR direct mode: a Wazuh rule XML file evaluated against telemetry.
+	ruleData, err := os.ReadFile(*rulePath)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: reading rule file: %v\n", err)
+		return 2
+	}
+	rules, err := ParseRules(ruleData)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 2
+	}
 	event := LoadEvent(eventBytes)
 
-	// Select rules to evaluate.
 	var selected []Rule
 	for _, r := range rules {
 		if *ruleID == "" || r.ID == *ruleID {
@@ -114,15 +148,12 @@ func run(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 	}
 
 	if *asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
 		payload := any(results)
 		if len(results) == 1 {
 			payload = results[0]
 		}
-		if err := enc.Encode(payload); err != nil {
-			fmt.Fprintf(stderr, "error: encoding JSON: %v\n", err)
-			return 2
+		if code := encodeJSON(stdout, stderr, payload); code != 0 {
+			return code
 		}
 	} else {
 		printReport(stdout, results)
@@ -132,6 +163,34 @@ func run(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 		return 0
 	}
 	return 1
+}
+
+// encodeJSON writes v as indented JSON, returning a nonzero exit code on failure.
+func encodeJSON(stdout, stderr io.Writer, v any) int {
+	enc := json.NewEncoder(stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(v); err != nil {
+		fmt.Fprintf(stderr, "error: encoding JSON: %v\n", err)
+		return 2
+	}
+	return 0
+}
+
+// printCandidateReport prints the control-class header and each rule's breakdown.
+func printCandidateReport(w io.Writer, rep *CandidateReport) {
+	verdict := "NO MATCH"
+	if rep.Matched {
+		verdict = "MATCH"
+	}
+	fmt.Fprintf(w, "Candidate %s [%s", firstNonEmpty(rep.CandidateID, "-"), strings.ToUpper(rep.ControlClass))
+	if rep.CandidateKind != "" {
+		fmt.Fprintf(w, "/%s", rep.CandidateKind)
+	}
+	fmt.Fprintf(w, "]: %s\n\n", verdict)
+	printReport(w, rep.Results)
+	for _, n := range rep.Notes {
+		fmt.Fprintf(w, "· %s\n", n)
+	}
 }
 
 // printReport writes a human-readable per-condition breakdown.
