@@ -122,11 +122,14 @@ type CandidateSpec struct {
 }
 
 // TestBasisSpec is the inline attack/discriminator sample and expected outcome.
+// Request carries the HTTP sample (WAF); Telemetry carries a decoded telemetry
+// event (EDR). Exactly one is populated, per the candidate's control class.
 type TestBasisSpec struct {
-	Kind       string       `json:"kind"`
-	ProofBasis string       `json:"proof_basis"`
-	Request    TestRequest  `json:"request"`
-	Expected   TestExpected `json:"expected"`
+	Kind       string          `json:"kind"`
+	ProofBasis string          `json:"proof_basis"`
+	Request    TestRequest     `json:"request"`
+	Telemetry  json.RawMessage `json:"telemetry,omitempty"`
+	Expected   TestExpected    `json:"expected"`
 }
 
 type TestRequest struct {

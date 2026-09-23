@@ -127,6 +127,7 @@ const (
 	execGitHub     = "github"      // dispatch a GitHub Actions workflow that runs the scenario
 	execGitHubGHCR = "github-ghcr" // github, but relay the image through the repo's GHCR
 	execFirewall   = "firewall"    // in-memory L3/L4 firewall-rule evaluation (no substrate)
+	execEDR        = "edr"         // in-memory Wazuh rule vs decoded telemetry (no substrate)
 )
 
 // substrate is a brought-up validation target ready to receive test traffic.
@@ -155,6 +156,13 @@ func executeScenario(ctx context.Context, req SubmitMitigationCheckRequest, runI
 	// vs a network-connection test — no substrate, WAF, or container.
 	if mode == execFirewall {
 		return runFirewallInMemory(ctx, req, out)
+	}
+
+	// EDR mode is a separate in-memory evaluator: a Wazuh (endpoint-detection) rule
+	// vs a decoded telemetry event — no substrate, WAF, or container. Selected by
+	// execution_mode or by the candidate's kind/shape.
+	if mode == execEDR || isEDRCandidate(req.Candidate) {
+		return runEDRInMemory(ctx, req, out)
 	}
 
 	var sub SubstrateSpec
