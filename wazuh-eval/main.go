@@ -38,6 +38,7 @@ func run(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 		cmdLine       = fs.String("cmd", "", "a Linux command to synthesize Wazuh auditd telemetry for (used as the event)")
 		cmdUser       = fs.String("cmd-user", "root", "user for -cmd telemetry (best-effort uid mapping)")
 		cmdHost       = fs.String("cmd-host", "linux-host", "agent/host name for -cmd telemetry")
+		footprint     = fs.Bool("footprint", false, "with -cmd: print the full list of telemetry the command generates (execve + child processes + FIM)")
 		ruleID        = fs.String("id", "", "evaluate only the rule with this id (default: all rules)")
 		asJSON        = fs.Bool("json", false, "emit the result as JSON")
 	)
@@ -63,7 +64,16 @@ func run(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 	// candidate it just prints the telemetry (command → telemetry); with one it is
 	// used as the event to evaluate (handled in the event-loading switch below).
 	if *cmdLine != "" && *rulePath == "" && *candidatePath == "" {
-		telemetry, terr := CommandToWazuhTelemetry(CommandInput{Command: *cmdLine, User: *cmdUser, Host: *cmdHost})
+		input := CommandInput{Command: *cmdLine, User: *cmdUser, Host: *cmdHost}
+		if *footprint {
+			events, terr := CommandTelemetryFootprint(input)
+			if terr != nil {
+				fmt.Fprintf(stderr, "error: %v\n", terr)
+				return 2
+			}
+			return encodeJSON(stdout, stderr, events)
+		}
+		telemetry, terr := CommandToWazuhTelemetry(input)
 		if terr != nil {
 			fmt.Fprintf(stderr, "error: %v\n", terr)
 			return 2
