@@ -35,6 +35,9 @@ func run(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 		candidatePath = fs.String("candidate", "", "path to a defense-generation candidate/result JSON; routes to the EDR or WAF evaluator by candidate kind")
 		eventPath     = fs.String("event", "", "path to the event JSON: decoded telemetry (EDR) or an HTTP request (WAF); default stdin")
 		logLine       = fs.String("log", "", "raw log line to evaluate instead of a JSON event (EDR only)")
+		cmdLine       = fs.String("cmd", "", "a Linux command to synthesize Wazuh auditd telemetry for (used as the event)")
+		cmdUser       = fs.String("cmd-user", "root", "user for -cmd telemetry (best-effort uid mapping)")
+		cmdHost       = fs.String("cmd-host", "linux-host", "agent/host name for -cmd telemetry")
 		ruleID        = fs.String("id", "", "evaluate only the rule with this id (default: all rules)")
 		asJSON        = fs.Bool("json", false, "emit the result as JSON")
 	)
@@ -46,22 +49,44 @@ func run(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 		fmt.Fprintln(stderr, "  # EDR direct mode (Wazuh rule XML):")
 		fmt.Fprintln(stderr, "  wazuh-eval -rule rules.xml -event telemetry.json")
 		fmt.Fprintln(stderr, "  cat telemetry.json | wazuh-eval -rule rules.xml")
+		fmt.Fprintln(stderr, "  # Synthesize Wazuh telemetry for a command (and optionally evaluate it):")
+		fmt.Fprintln(stderr, "  wazuh-eval -cmd 'cat /etc/passwd'")
+		fmt.Fprintln(stderr, "  wazuh-eval -rule rules.xml -cmd 'cat /etc/passwd'")
 		fmt.Fprintln(stderr, "\nFlags:")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+
+	// -cmd synthesizes Wazuh auditd telemetry for a Linux command. With no rule or
+	// candidate it just prints the telemetry (command → telemetry); with one it is
+	// used as the event to evaluate (handled in the event-loading switch below).
+	if *cmdLine != "" && *rulePath == "" && *candidatePath == "" {
+		telemetry, terr := CommandToWazuhTelemetry(CommandInput{Command: *cmdLine, User: *cmdUser, Host: *cmdHost})
+		if terr != nil {
+			fmt.Fprintf(stderr, "error: %v\n", terr)
+			return 2
+		}
+		fmt.Fprintln(stdout, string(telemetry))
+		return 0
+	}
 	if (*rulePath == "") == (*candidatePath == "") {
-		fmt.Fprintln(stderr, "error: provide exactly one of -rule or -candidate")
+		fmt.Fprintln(stderr, "error: provide exactly one of -rule or -candidate (or -cmd alone to print telemetry)")
 		fs.Usage()
 		return 2
 	}
 
-	// Load the event bytes: -log wins, else -event file, else stdin.
+	// Load the event bytes: -cmd wins, else -log, else -event file, else stdin.
 	var eventBytes []byte
 	var err error
 	switch {
+	case *cmdLine != "":
+		eventBytes, err = CommandToWazuhTelemetry(CommandInput{Command: *cmdLine, User: *cmdUser, Host: *cmdHost})
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 2
+		}
 	case *logLine != "":
 		eventBytes = []byte(*logLine)
 	case *eventPath != "":
@@ -77,7 +102,7 @@ func run(args []string, stdout, stderr io.Writer, stdin io.Reader) int {
 			return 2
 		}
 		if len(strings.TrimSpace(string(eventBytes))) == 0 {
-			fmt.Fprintln(stderr, "error: no event provided (use -event, -log, or pipe JSON to stdin)")
+			fmt.Fprintln(stderr, "error: no event provided (use -cmd, -event, -log, or pipe JSON to stdin)")
 			fs.Usage()
 			return 2
 		}

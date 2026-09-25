@@ -48,6 +48,37 @@ would be **blocked**.
 **HTTP request JSON** (WAF): `{"method","path","headers","body"}` — `path` may
 include a `?query` (aliases: `uri`/`url` → `path`, `request_body` → `body`).
 
+## Command → Wazuh telemetry
+
+`CommandToWazuhTelemetry` synthesizes the telemetry a Wazuh agent would report
+for a command run on a Linux host or container. On Linux, command execution is
+captured by the Audit subsystem (auditd): the kernel emits an `execve()` event
+that Wazuh's `auditd` decoder turns into `data.audit.*` fields. The function
+produces that decoded event — structured fields **and** the raw multi-record
+`full_log` (SYSCALL / EXECVE / CWD / PROCTITLE) — so it round-trips into the
+evaluator.
+
+```go
+ev, _ := CommandToWazuhEvent(CommandInput{Command: "cat /etc/passwd", User: "root"})
+res := Evaluate(rule, ev) // command → telemetry → verdict
+```
+
+From the CLI:
+
+```bash
+# Print the telemetry for a command:
+wazuh-eval -cmd 'cat /etc/passwd'
+
+# Synthesize telemetry AND evaluate a rule against it in one step:
+wazuh-eval -rule rules.xml -cmd 'cat /etc/passwd'
+```
+
+A shell pipeline or builtin (`|`, `&&`, `;`, `>`, `` ` ``, `$()`) is recorded as a
+single `/bin/sh -c "<command>"` execve — the first audit event the kernel
+actually produces. Pass `CommandInput.Argv` to synthesize a bare execve instead.
+uid/cwd are best-effort from `User` (override with `UID`/`Cwd`); this models
+auditd execve, not Sysmon-for-Linux.
+
 ## EDR direct mode
 
 ```bash
