@@ -98,6 +98,31 @@ Known side effects (child processes, file writes) come from a profile table
 (user/group management, cron, ssh keys, chmod/chown/rm/touch, wget/curl, …) that
 is easy to extend; everything else falls back to a faithful execve.
 
+### Why synthesize telemetry instead of running the command?
+
+For the purpose this serves — **evaluating whether a Wazuh rule would fire**, not
+forensically reconstructing a host — the synthesized telemetry is sufficient
+because rule matching depends only on the *decoded fields and log shape* a rule
+inspects, and those are fully determined by the command itself. A Wazuh rule keys
+on `data.audit.execve.a0`, `audit.exe`, `syscheck.path`, the `full_log` text,
+etc.; it never sees kernel timing, real pids, or inode numbers, so reproducing
+those exactly buys nothing for a match/no-match verdict. Running the command on a
+live host and collecting from a real agent adds heavy, non-deterministic cost (a
+provisioned VM/container with auditd + FIM tuned, root to trigger the syscalls,
+log-flush and manager-ingestion latency, and cleanup of the mutations the command
+actually makes — creating users, deleting files, opening network connections) and
+introduces environment variance (distro, PATH, wrapper internals) that makes
+results hard to reproduce in CI. The generator instead produces the same
+canonical decoded event **deterministically, instantly, and side-effect-free**,
+in exactly the schema Wazuh's decoders emit, so it can be replayed and diffed. Its
+one genuine limitation is *coverage of side effects*: it models the process tree
+and the well-known file/FIM footprint from a profile table, so a rule that hinges
+on a real binary's obscure runtime behavior (an unusual child process or a file
+write we haven't profiled) could be missed — for those cases a one-time live
+capture to seed the profile is the right complement. But for validating detection
+logic across the space of commands and rules, deterministic synthesis is faster,
+safer, reproducible, and matches on precisely the fields that decide the outcome.
+
 ## EDR direct mode
 
 ```bash
