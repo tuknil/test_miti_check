@@ -79,6 +79,25 @@ actually produces. Pass `CommandInput.Argv` to synthesize a bare execve instead.
 uid/cwd are best-effort from `User` (override with `UID`/`Cwd`); this models
 auditd execve, not Sysmon-for-Linux.
 
+### Full footprint of a command
+
+`CommandTelemetryFootprint` returns the **list** of every event a command line
+generates. It decomposes an arbitrary Linux shell command — pipelines,
+sequences (`;`, `&&`, `||`, `&`), redirections (→ FIM/read events), command
+substitution `$()`/backticks, subshells, `VAR=val` prefixes, wrapper programs
+(`sudo`/`env`/`nohup`/`timeout`/…), and builtins (no execve) — into the process
+executions and file events it produces. It never errors; unknown programs still
+yield their own execve.
+
+```bash
+wazuh-eval -cmd 'sudo useradd -m bob' -footprint      # 9 events: useradd + account FIM
+wazuh-eval -cmd 'cat a.txt | grep x > out' -footprint # cat, grep execve + read + write
+```
+
+Known side effects (child processes, file writes) come from a profile table
+(user/group management, cron, ssh keys, chmod/chown/rm/touch, wget/curl, …) that
+is easy to extend; everything else falls back to a faithful execve.
+
 ## EDR direct mode
 
 ```bash
