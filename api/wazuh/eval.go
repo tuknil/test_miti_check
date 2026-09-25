@@ -26,14 +26,14 @@ import (
 
 // CondResult is the outcome of one condition within a rule.
 type CondResult struct {
-	Kind    string `json:"kind"`              // "match", "field:win.eventdata.image", "srcip", ...
-	Pattern string `json:"pattern"`           // the rule's pattern/value
-	Negate  bool   `json:"negate,omitempty"`  // condition inverted with negate="yes"
-	Matched bool   `json:"matched"`           // did this condition pass?
-	Field   string `json:"field,omitempty"`   // event field consulted
-	Value   string `json:"value,omitempty"`   // event value seen (empty if field absent)
-	Present bool   `json:"present"`           // was the consulted field present?
-	Detail  string `json:"detail,omitempty"`  // engine notes / approximation warnings
+	Kind    string `json:"kind"`             // "match", "field:win.eventdata.image", "srcip", ...
+	Pattern string `json:"pattern"`          // the rule's pattern/value
+	Negate  bool   `json:"negate,omitempty"` // condition inverted with negate="yes"
+	Matched bool   `json:"matched"`          // did this condition pass?
+	Field   string `json:"field,omitempty"`  // event field consulted
+	Value   string `json:"value,omitempty"`  // event value seen (empty if field absent)
+	Present bool   `json:"present"`          // was the consulted field present?
+	Detail  string `json:"detail,omitempty"` // engine notes / approximation warnings
 }
 
 // Result is the full evaluation of one rule against one event.
