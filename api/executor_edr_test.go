@@ -16,6 +16,7 @@ const edrWazuhRule = `<group name="janus,edr-proof,">
 
 func edrRequest(t *testing.T, telemetry string, blocked bool) SubmitMitigationCheckRequest {
 	t.Helper()
+	t.Setenv("WAZUH_SYNTHETIC", "true") // exercise the synthetic (no-agent) flow
 	cand, _ := json.Marshal(CandidateSpec{Kind: "endpoint-detection-rule", Engine: "wazuh", RuleID: "103047", Rule: edrWazuhRule, Action: "kill-process"})
 	tb, _ := json.Marshal(TestBasisSpec{Kind: "edr-telemetry", ProofBasis: "mitigation-discriminator",
 		Telemetry: json.RawMessage(telemetry), Expected: TestExpected{Blocked: &blocked}})
@@ -24,13 +25,33 @@ func edrRequest(t *testing.T, telemetry string, blocked bool) SubmitMitigationCh
 }
 
 // edrCommandRequest builds an EDR request whose test basis is a command (the
-// telemetry is synthesized from it).
-func edrCommandRequest(rule, command string, blocked bool) SubmitMitigationCheckRequest {
+// telemetry is synthesized from it). It selects the synthetic flow.
+func edrCommandRequest(t *testing.T, rule, command string, blocked bool) SubmitMitigationCheckRequest {
+	t.Helper()
+	t.Setenv("WAZUH_SYNTHETIC", "true")
 	cand, _ := json.Marshal(CandidateSpec{Kind: "endpoint-detection-rule", Engine: "wazuh", Rule: rule, Action: "kill-process"})
 	tb, _ := json.Marshal(TestBasisSpec{Kind: "edr-command", ProofBasis: "mitigation-discriminator",
 		Command: command, Expected: TestExpected{Blocked: &blocked}})
 	return SubmitMitigationCheckRequest{ContractID: contractID, RequestID: "edr-cmd", CorrelationID: "correlation-1",
 		Candidate: cand, TestBasis: tb}
+}
+
+// By default (WAZUH_SYNTHETIC unset/false) EDR uses inject-and-observe, which
+// needs the EDR_* agent configuration; without it the run is could-not-test.
+func TestEDRDefaultUsesInjectObserve(t *testing.T) {
+	t.Setenv("WAZUH_SYNTHETIC", "")
+	t.Setenv("EDR_INDEXER_URL", "") // ensure config is absent
+	cand, _ := json.Marshal(CandidateSpec{Kind: "endpoint-detection-rule", Engine: "wazuh", Rule: edrAuditExecRule})
+	blocked := true
+	tb, _ := json.Marshal(TestBasisSpec{Kind: "edr-command", Command: "adduser eve", Expected: TestExpected{Blocked: &blocked}})
+	req := SubmitMitigationCheckRequest{ContractID: contractID, RequestID: "edr-io", Candidate: cand, TestBasis: tb}
+	out := executeScenario(context.Background(), req, "run-io", "result-io")
+	if out.Substrate.Image != "wazuh agent (inject-and-observe)" {
+		t.Fatalf("default EDR did not route to inject-and-observe: image=%q", out.Substrate.Image)
+	}
+	if out.TerminalState != stateCouldNotTest {
+		t.Fatalf("expected could-not-test without EDR_* config, got %s (%s)", out.TerminalState, out.Actual.Detail)
+	}
 }
 
 const edrAuditExecRule = `<group name="audit,">
@@ -52,7 +73,7 @@ const edrAuditFIMRule = `<group name="syscheck,">
 // EDR command test basis: the command is synthesized into telemetry, and the rule
 // matches its execve event.
 func TestEDRCommandMatchesExecve(t *testing.T) {
-	out := executeScenario(context.Background(), edrCommandRequest(edrAuditExecRule, "adduser eve", true), "run-c1", "result-c1")
+	out := executeScenario(context.Background(), edrCommandRequest(t, edrAuditExecRule, "adduser eve", true), "run-c1", "result-c1")
 	if out.TerminalState != stateBlocked || !out.Actual.Blocked {
 		t.Fatalf("expected detected/blocked for adduser command, got %s (%s)", out.TerminalState, out.Actual.Detail)
 	}
@@ -64,7 +85,7 @@ func TestEDRCommandMatchesExecve(t *testing.T) {
 // EDR command test basis: the rule matches a FIM event from the synthesized
 // footprint (not just the execve) — the rule fires if ANY event matches.
 func TestEDRCommandMatchesFIMEvent(t *testing.T) {
-	out := executeScenario(context.Background(), edrCommandRequest(edrAuditFIMRule, "adduser eve", true), "run-c2", "result-c2")
+	out := executeScenario(context.Background(), edrCommandRequest(t, edrAuditFIMRule, "adduser eve", true), "run-c2", "result-c2")
 	if out.TerminalState != stateBlocked || !out.Actual.Blocked {
 		t.Fatalf("expected FIM /etc/passwd match from adduser footprint, got %s (%s)", out.TerminalState, out.Actual.Detail)
 	}
@@ -72,7 +93,7 @@ func TestEDRCommandMatchesFIMEvent(t *testing.T) {
 
 // EDR command test basis: an unrelated command is not detected.
 func TestEDRCommandNoMatch(t *testing.T) {
-	out := executeScenario(context.Background(), edrCommandRequest(edrAuditExecRule, "ls -la /tmp", true), "run-c3", "result-c3")
+	out := executeScenario(context.Background(), edrCommandRequest(t, edrAuditExecRule, "ls -la /tmp", true), "run-c3", "result-c3")
 	if out.TerminalState != stateNotBlocked || out.Actual.Blocked || out.Match {
 		t.Fatalf("expected not-detected for benign command, got %s match=%v", out.TerminalState, out.Match)
 	}
@@ -100,7 +121,7 @@ func TestEDRDispatchByCandidateKind(t *testing.T) {
 	req := edrRequest(t, telemetry, true)
 	req.ExecutionMode = "" // no explicit mode; isEDRCandidate must still route to EDR
 	out := executeScenario(context.Background(), req, "run-2", "result-2")
-	if out.Substrate.Image != "endpoint telemetry (in-memory Wazuh)" {
+	if out.Substrate.Image != "endpoint telemetry (in-memory Wazuh, synthetic)" {
 		t.Fatalf("did not route to EDR evaluator: image=%q", out.Substrate.Image)
 	}
 	if out.TerminalState != stateBlocked {
@@ -121,8 +142,9 @@ func TestEDRExecutionNoMatchAllows(t *testing.T) {
 	}
 }
 
-// Missing telemetry -> could-not-test (never a fabricated verdict).
+// Missing telemetry AND command (synthetic flow) -> could-not-test.
 func TestEDRMissingTelemetryCouldNotTest(t *testing.T) {
+	t.Setenv("WAZUH_SYNTHETIC", "true")
 	cand, _ := json.Marshal(CandidateSpec{Engine: "wazuh", Rule: edrWazuhRule})
 	blocked := true
 	tb, _ := json.Marshal(TestBasisSpec{Kind: "edr-telemetry", Expected: TestExpected{Blocked: &blocked}})

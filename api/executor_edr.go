@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/janus/mitigation-check-api/wazuh"
+	wazuh_ssh "github.com/janus/mitigation-check-api/wazuh-ssh"
 )
 
 // isEDRCandidate reports whether the request's candidate is an endpoint-detection
@@ -54,7 +55,16 @@ func runEDRInMemory(ctx context.Context, req SubmitMitigationCheckRequest, out R
 		StatusCode:     test.Expected.StatusCode,
 	}
 	out.TestBasis = &test
-	out.Substrate.Image = "endpoint telemetry (in-memory Wazuh)"
+
+	// Telemetry source selector. Default (WAZUH_SYNTHETIC unset/false): inject the
+	// activity on a real Wazuh agent and observe the actual alerts it raises.
+	// WAZUH_SYNTHETIC=true uses the synthetic command→telemetry flow below, which
+	// evaluates the candidate rule in-process without an agent.
+	if !getEnvBool("WAZUH_SYNTHETIC", false) {
+		return runEDRInjectObserve(ctx, out, cand, test)
+	}
+
+	out.Substrate.Image = "endpoint telemetry (in-memory Wazuh, synthetic)"
 
 	// Resolve the telemetry to evaluate the rule against: for an EDR test basis a
 	// command is synthesized into the Wazuh telemetry it would generate (the full
@@ -152,6 +162,70 @@ func runEDRInMemory(ctx context.Context, req SubmitMitigationCheckRequest, out R
 	out.ProseSummary = fmt.Sprintf("Wazuh EDR candidate %s the telemetry sample; actual %s expected.", verdict, agree)
 	if test.ProofBasis == "mitigation-discriminator" && out.TerminalState == stateBlocked {
 		out.Limitations = append(out.Limitations, "indirect proof: only discriminator telemetry was proven detected (LLD §7.3)")
+	}
+	return out
+}
+
+// runEDRInjectObserve is the real (non-synthetic) EDR path: it injects the test
+// basis command on a live Wazuh agent and observes the actual alerts the manager
+// raises, rather than synthesizing telemetry in-process. Configuration comes from
+// the EDR_* environment (see wazuh_ssh.LoadConfig). The candidate rule is assumed
+// already deployed on the manager.
+func runEDRInjectObserve(ctx context.Context, out RunOutcome, cand CandidateSpec, test TestBasisSpec) RunOutcome {
+	out.Substrate.Image = "wazuh agent (inject-and-observe)"
+
+	command := strings.TrimSpace(test.Command)
+	if command == "" {
+		return couldNotTest(out, "inject-and-observe EDR requires a command test basis (or set WAZUH_SYNTHETIC=true for the synthetic telemetry flow)")
+	}
+	cfg, err := wazuh_ssh.LoadConfig()
+	if err != nil {
+		return couldNotTest(out, "inject-and-observe configuration: "+err.Error())
+	}
+
+	token := newID()
+	out.Steps = append(out.Steps, fmt.Sprintf("injecting command on Wazuh agent %s (%s) and observing alerts", cfg.AgentID, cfg.ExecutionMode))
+	res, err := cfg.Execute(ctx, command, token, firstNonEmpty(test.CommandHost, cfg.SSHHost))
+	if err != nil {
+		return couldNotTest(out, "inject-and-observe execution: "+err.Error())
+	}
+	if !res.EDRObservation.Request.Injected {
+		return couldNotTest(out, "inject-and-observe: command injection failed: "+firstNonEmpty(res.EDRObservation.Request.InjectionDetail, "unknown error"))
+	}
+
+	detectedIDs := res.EDRObservation.Response.DetectedRuleIDs
+	detected := len(detectedIDs) > 0
+	if detected {
+		out.Actual = Actual{
+			Blocked:       true,
+			ReachedApp:    false,
+			MatchedRuleID: strings.Join(detectedIDs, ","),
+			Detail:        fmt.Sprintf("Wazuh raised alert(s) for the injected activity (rules %s); control decision %q", strings.Join(detectedIDs, ","), res.Control.ControlDecision),
+		}
+		out.TerminalState = stateBlocked
+		out.Steps = append(out.Steps, "observed detection: rules "+strings.Join(detectedIDs, ","))
+	} else {
+		out.Actual = Actual{
+			Blocked:    false,
+			ReachedApp: true,
+			Detail:     "Wazuh raised no alert for the injected activity; not detected/prevented",
+		}
+		out.TerminalState = stateNotBlocked
+		out.Steps = append(out.Steps, "observed no detection for the injected activity")
+	}
+
+	out.Match = out.Actual.Blocked && (out.Actual.Blocked == out.Expected.Blocked)
+	verdict := "DETECTED"
+	if !out.Actual.Blocked {
+		verdict = "NOT DETECTED"
+	}
+	agree := "matches"
+	if !out.Match {
+		agree = "does NOT match"
+	}
+	out.ProseSummary = fmt.Sprintf("Wazuh EDR candidate %s the injected command on a live agent; actual %s expected.", verdict, agree)
+	if test.ProofBasis == "mitigation-discriminator" && out.TerminalState == stateBlocked {
+		out.Limitations = append(out.Limitations, "indirect proof: only discriminator activity was proven detected (LLD §7.3)")
 	}
 	return out
 }
