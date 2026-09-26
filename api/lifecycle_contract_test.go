@@ -479,8 +479,11 @@ func TestCanonicalResultBytesSurviveMigrationRecoveryAndResultEndpoint(t *testin
 	request := httptest.NewRequest(http.MethodGet, "/v1/mitigation-check-runs/"+run.RunID+"/result", nil)
 	response := httptest.NewRecorder()
 	handleRunResult(response, request, run.RunID)
-	if response.Code != http.StatusOK || !bytes.Equal(response.Body.Bytes(), payload) {
-		t.Fatalf("result endpoint bytes changed: status=%d\n got=%s\nwant=%s", response.Code, response.Body.Bytes(), payload)
+	// Databricks keeps the full canonical bytes (asserted via publisher above); the
+	// API /result endpoint returns the projected view (apiResultKeysToHide removed).
+	wantView := apiResultView(payload)
+	if response.Code != http.StatusOK || !bytes.Equal(response.Body.Bytes(), wantView) {
+		t.Fatalf("result endpoint bytes changed: status=%d\n got=%s\nwant=%s", response.Code, response.Body.Bytes(), wantView)
 	}
 }
 

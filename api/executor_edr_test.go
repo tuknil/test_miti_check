@@ -14,10 +14,10 @@ const edrWazuhRule = `<group name="janus,edr-proof,">
   </rule>
 </group>`
 
-func edrRequest(t *testing.T, telemetry string, blocked bool) SubmitMitigationCheckRequest {
+func edrRequest(t *testing.T, telemetry, action string, blocked bool) SubmitMitigationCheckRequest {
 	t.Helper()
 	t.Setenv("WAZUH_SYNTHETIC", "true") // exercise the synthetic (no-agent) flow
-	cand, _ := json.Marshal(CandidateSpec{Kind: "endpoint-detection-rule", Engine: "wazuh", RuleID: "103047", Rule: edrWazuhRule, Action: "kill-process"})
+	cand, _ := json.Marshal(CandidateSpec{Kind: "endpoint-detection-rule", Engine: "wazuh", RuleID: "103047", Rule: edrWazuhRule, Action: action})
 	tb, _ := json.Marshal(TestBasisSpec{Kind: "edr-telemetry", ProofBasis: "mitigation-discriminator",
 		Telemetry: json.RawMessage(telemetry), Expected: TestExpected{Blocked: &blocked}})
 	return SubmitMitigationCheckRequest{ContractID: contractID, RequestID: "edr-1", CorrelationID: "correlation-1",
@@ -26,10 +26,10 @@ func edrRequest(t *testing.T, telemetry string, blocked bool) SubmitMitigationCh
 
 // edrCommandRequest builds an EDR request whose test basis is a command (the
 // telemetry is synthesized from it). It selects the synthetic flow.
-func edrCommandRequest(t *testing.T, rule, command string, blocked bool) SubmitMitigationCheckRequest {
+func edrCommandRequest(t *testing.T, rule, command, action string, blocked bool) SubmitMitigationCheckRequest {
 	t.Helper()
 	t.Setenv("WAZUH_SYNTHETIC", "true")
-	cand, _ := json.Marshal(CandidateSpec{Kind: "endpoint-detection-rule", Engine: "wazuh", Rule: rule, Action: "kill-process"})
+	cand, _ := json.Marshal(CandidateSpec{Kind: "endpoint-detection-rule", Engine: "wazuh", Rule: rule, Action: action})
 	tb, _ := json.Marshal(TestBasisSpec{Kind: "edr-command", ProofBasis: "mitigation-discriminator",
 		Command: command, Expected: TestExpected{Blocked: &blocked}})
 	return SubmitMitigationCheckRequest{ContractID: contractID, RequestID: "edr-cmd", CorrelationID: "correlation-1",
@@ -70,69 +70,90 @@ const edrAuditFIMRule = `<group name="syscheck,">
   </rule>
 </group>`
 
-// EDR command test basis: the command is synthesized into telemetry, and the rule
-// matches its execve event.
-func TestEDRCommandMatchesExecve(t *testing.T) {
-	out := executeScenario(context.Background(), edrCommandRequest(t, edrAuditExecRule, "adduser eve", true), "run-c1", "result-c1")
-	if out.TerminalState != stateBlocked || !out.Actual.Blocked {
-		t.Fatalf("expected detected/blocked for adduser command, got %s (%s)", out.TerminalState, out.Actual.Detail)
+// MC31-002 regression: the synthetic (in-memory) path must not report detection
+// as prevention. A preventive candidate whose rule matches yields DETECTION only
+// (could-not-test for prevention); a monitor candidate yields not-blocked. Neither
+// ever reports blocked/match from synthesized telemetry.
+func TestEDRSyntheticDetectionIsNotPrevention(t *testing.T) {
+	telemetry := `{"event":{"type":"Process Creation"},"src":{"process":{"cmdline":"powershell.exe -EncodedCommand SQBF"}}}`
+
+	// Preventive action (kill-process): detection confirmed, prevention unverified.
+	prevent := executeScenario(context.Background(), edrRequest(t, telemetry, "kill-process", true), "run-p", "result-p")
+	if prevent.Actual.Blocked || prevent.Match {
+		t.Fatalf("synthetic preventive match must NOT report blocked/match: blocked=%v match=%v", prevent.Actual.Blocked, prevent.Match)
 	}
-	if !out.Match {
-		t.Fatalf("expected match=true")
+	if prevent.TerminalState != stateCouldNotTest {
+		t.Fatalf("preventive+detected want could-not-test, got %s (%s)", prevent.TerminalState, prevent.Actual.Detail)
+	}
+	if prevent.Actual.MatchedRuleID != "103047" {
+		t.Fatalf("detection should be recorded (MatchedRuleID), got %q", prevent.Actual.MatchedRuleID)
+	}
+
+	// Monitor action (non-preventive): detection, but definitively not a block.
+	monitor := executeScenario(context.Background(), edrRequest(t, telemetry, "monitor", true), "run-m", "result-m")
+	if monitor.Actual.Blocked || monitor.Match {
+		t.Fatalf("monitor match must NOT report blocked/match: blocked=%v match=%v", monitor.Actual.Blocked, monitor.Match)
+	}
+	if monitor.TerminalState != stateNotBlocked {
+		t.Fatalf("monitor+detected want not-blocked, got %s (%s)", monitor.TerminalState, monitor.Actual.Detail)
+	}
+
+	// The two actions must produce distinct honest outcomes.
+	if prevent.TerminalState == monitor.TerminalState {
+		t.Fatalf("monitor vs block should differ; both were %s", prevent.TerminalState)
 	}
 }
 
-// EDR command test basis: the rule matches a FIM event from the synthesized
-// footprint (not just the execve) — the rule fires if ANY event matches.
-func TestEDRCommandMatchesFIMEvent(t *testing.T) {
-	out := executeScenario(context.Background(), edrCommandRequest(t, edrAuditFIMRule, "adduser eve", true), "run-c2", "result-c2")
-	if out.TerminalState != stateBlocked || !out.Actual.Blocked {
-		t.Fatalf("expected FIM /etc/passwd match from adduser footprint, got %s (%s)", out.TerminalState, out.Actual.Detail)
+// EDR command test basis: synthesized telemetry DETECTS via the execve event
+// (preventive candidate → detection-only / could-not-test, never blocked).
+func TestEDRCommandDetectsExecve(t *testing.T) {
+	out := executeScenario(context.Background(), edrCommandRequest(t, edrAuditExecRule, "adduser eve", "kill-process", true), "run-c1", "result-c1")
+	if out.TerminalState != stateCouldNotTest || out.Actual.MatchedRuleID != "80785" {
+		t.Fatalf("expected detection-only (could-not-test) for adduser, got %s rule=%q (%s)", out.TerminalState, out.Actual.MatchedRuleID, out.Actual.Detail)
+	}
+	if out.Actual.Blocked || out.Match {
+		t.Fatalf("synthetic detection must not be reported as prevention: %+v", out.Actual)
+	}
+}
+
+// EDR command test basis: detection can come from a FIM event in the synthesized
+// footprint (not just the execve).
+func TestEDRCommandDetectsFIMEvent(t *testing.T) {
+	out := executeScenario(context.Background(), edrCommandRequest(t, edrAuditFIMRule, "adduser eve", "kill-process", true), "run-c2", "result-c2")
+	if out.TerminalState != stateCouldNotTest || out.Actual.MatchedRuleID != "80790" {
+		t.Fatalf("expected FIM /etc/passwd detection from adduser footprint, got %s rule=%q (%s)", out.TerminalState, out.Actual.MatchedRuleID, out.Actual.Detail)
+	}
+	if out.Actual.Blocked {
+		t.Fatalf("synthetic FIM detection must not be reported as blocked")
 	}
 }
 
 // EDR command test basis: an unrelated command is not detected.
 func TestEDRCommandNoMatch(t *testing.T) {
-	out := executeScenario(context.Background(), edrCommandRequest(t, edrAuditExecRule, "ls -la /tmp", true), "run-c3", "result-c3")
+	out := executeScenario(context.Background(), edrCommandRequest(t, edrAuditExecRule, "ls -la /tmp", "kill-process", true), "run-c3", "result-c3")
 	if out.TerminalState != stateNotBlocked || out.Actual.Blocked || out.Match {
 		t.Fatalf("expected not-detected for benign command, got %s match=%v", out.TerminalState, out.Match)
-	}
-}
-
-// EDR candidate + matching telemetry -> detected/blocked, match agrees with expected.
-func TestEDRExecutionMatchBlocks(t *testing.T) {
-	telemetry := `{"event":{"type":"Process Creation"},"src":{"process":{"cmdline":"powershell.exe -EncodedCommand SQBF"}}}`
-	req := edrRequest(t, telemetry, true)
-	out := executeScenario(context.Background(), req, "run-1", "result-1")
-	if out.TerminalState != stateBlocked {
-		t.Fatalf("terminal_state=%s want %s (detail=%s)", out.TerminalState, stateBlocked, out.Actual.Detail)
-	}
-	if !out.Actual.Blocked || out.Actual.MatchedRuleID != "103047" {
-		t.Fatalf("actual=%+v", out.Actual)
-	}
-	if !out.Match {
-		t.Fatalf("expected match=true when detected and expected blocked")
 	}
 }
 
 // EDR dispatch by candidate kind even when execution_mode is unset (defaults).
 func TestEDRDispatchByCandidateKind(t *testing.T) {
 	telemetry := `{"event":{"type":"Process Creation"},"src":{"process":{"cmdline":"powershell.exe -EncodedCommand X"}}}`
-	req := edrRequest(t, telemetry, true)
+	req := edrRequest(t, telemetry, "kill-process", true)
 	req.ExecutionMode = "" // no explicit mode; isEDRCandidate must still route to EDR
 	out := executeScenario(context.Background(), req, "run-2", "result-2")
 	if out.Substrate.Image != "endpoint telemetry (in-memory Wazuh, synthetic)" {
 		t.Fatalf("did not route to EDR evaluator: image=%q", out.Substrate.Image)
 	}
-	if out.TerminalState != stateBlocked {
-		t.Fatalf("terminal_state=%s want blocked", out.TerminalState)
+	if out.Actual.MatchedRuleID != "103047" {
+		t.Fatalf("expected detection to be recorded, got rule=%q", out.Actual.MatchedRuleID)
 	}
 }
 
 // EDR candidate + benign telemetry -> not detected; a not-blocked result never matches.
 func TestEDRExecutionNoMatchAllows(t *testing.T) {
 	telemetry := `{"event":{"type":"Process Creation"},"src":{"process":{"cmdline":"powershell.exe -File backup.ps1"}}}`
-	req := edrRequest(t, telemetry, true)
+	req := edrRequest(t, telemetry, "kill-process", true)
 	out := executeScenario(context.Background(), req, "run-3", "result-3")
 	if out.TerminalState != stateNotBlocked {
 		t.Fatalf("terminal_state=%s want %s", out.TerminalState, stateNotBlocked)

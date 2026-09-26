@@ -129,41 +129,55 @@ func runEDRInMemory(ctx context.Context, req SubmitMitigationCheckRequest, out R
 		}
 	}
 
-	if matched {
-		out.Actual = Actual{
-			Blocked:       true,
-			ReachedApp:    false,
-			MatchedRuleID: matchedRuleID,
-			Detail:        fmt.Sprintf("Wazuh rule %s matched telemetry [%s] (%d condition(s)); endpoint action %q would fire", matchedRuleID, matchedOn, matchedConds, firstNonEmpty(cand.Action, "detect")),
-		}
-		out.TerminalState = stateBlocked
-		out.Steps = append(out.Steps, "Wazuh rule "+matchedRuleID+" matched telemetry -> detected/prevented")
-	} else {
-		out.Actual = Actual{
-			Blocked:    false,
-			ReachedApp: true,
-			Detail:     "no Wazuh rule matched the telemetry; activity was not detected/prevented",
-		}
+	// This path evaluates synthesized telemetry in-process: a rule match proves the
+	// rule would DETECT the activity, but it neither installs the rule in the
+	// configured Wazuh manager nor observes an active-response/prevention action.
+	// So it never reports prevention (Blocked=true) — that would be false mitigation
+	// evidence. It emits an honest detection-only / non-prevention outcome, and
+	// distinguishes a preventive candidate (kill/quarantine/…) from a monitor one.
+	out.Actual.MatchedRuleID = matchedRuleID
+	out.Actual.ReachedApp = true // the activity occurred; the endpoint did not block it here
+	preventive := isPreventiveAction(cand.Action)
+	switch {
+	case matched && preventive:
+		out.Actual.Blocked = false
+		out.Actual.Detail = fmt.Sprintf("synthetic preflight: rule %s matched telemetry [%s] (%d condition(s)) — DETECTION confirmed; prevention (action=%q) was NOT exercised against the Wazuh manager", matchedRuleID, matchedOn, matchedConds, cand.Action)
+		out.TerminalState = stateCouldNotTest // prevention is unverified in a preflight
+		out.Steps = append(out.Steps, "synthetic preflight detected the activity; prevention not verified")
+		out.Limitations = append(out.Limitations, "synthetic in-memory evaluation proves DETECTION only; set WAZUH_SYNTHETIC=false to observe monitor/block behavior on the configured Wazuh manager")
+		out.ProseSummary = fmt.Sprintf("Synthetic preflight: Wazuh rule %s DETECTED the activity; prevention not verified (detection-only).", matchedRuleID)
+	case matched && !preventive:
+		out.Actual.Blocked = false
+		out.Actual.Detail = fmt.Sprintf("rule %s matched telemetry [%s] (%d condition(s)) — DETECTION; candidate action=%q is non-preventive (monitor), so the activity is not blocked", matchedRuleID, matchedOn, matchedConds, firstNonEmpty(cand.Action, "detect"))
+		out.TerminalState = stateNotBlocked
+		out.Steps = append(out.Steps, "detection-only (monitor) control matched; not a preventive mitigation")
+		out.Limitations = append(out.Limitations, "candidate is a detection/monitor control: it detects but does not prevent")
+		out.ProseSummary = fmt.Sprintf("Wazuh rule %s DETECTED the activity; candidate action is non-preventive (monitor), so no mitigation/block occurs.", matchedRuleID)
+	default: // not detected
+		out.Actual.Blocked = false
+		out.Actual.Detail = "no Wazuh rule matched the telemetry; activity was not detected"
 		out.TerminalState = stateNotBlocked
 		out.Steps = append(out.Steps, "no Wazuh rule matched telemetry -> not detected")
+		out.ProseSummary = "No Wazuh rule matched the synthesized telemetry; not detected."
 	}
 
-	// A match requires an actual block: not-detected never counts as a match; when
-	// detected it must still agree with the expected outcome.
+	// The synthetic path never observes a prevention/block, so it never reports a
+	// mitigation match. Authoritative block/monitor evidence comes from the
+	// inject-and-observe path against the configured Wazuh manager.
 	out.Match = out.Actual.Blocked && (out.Actual.Blocked == out.Expected.Blocked)
-	verdict := "DETECTED"
-	if !out.Actual.Blocked {
-		verdict = "NOT DETECTED"
-	}
-	agree := "matches"
-	if !out.Match {
-		agree = "does NOT match"
-	}
-	out.ProseSummary = fmt.Sprintf("Wazuh EDR candidate %s the telemetry sample; actual %s expected.", verdict, agree)
-	if test.ProofBasis == "mitigation-discriminator" && out.TerminalState == stateBlocked {
-		out.Limitations = append(out.Limitations, "indirect proof: only discriminator telemetry was proven detected (LLD §7.3)")
-	}
 	return out
+}
+
+// isPreventiveAction reports whether a candidate's native action actually blocks
+// or prevents the activity (versus a detection/monitor/log-only action).
+func isPreventiveAction(action string) bool {
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case "kill-process", "kill", "terminate", "quarantine", "isolate", "block",
+		"prevent", "deny", "drop", "remove", "delete", "active-response":
+		return true
+	default:
+		return false
+	}
 }
 
 // runEDRInjectObserve is the real (non-synthetic) EDR path: it injects the test
@@ -193,39 +207,45 @@ func runEDRInjectObserve(ctx context.Context, out RunOutcome, cand CandidateSpec
 		return couldNotTest(out, "inject-and-observe: command injection failed: "+firstNonEmpty(res.EDRObservation.Request.InjectionDetail, "unknown error"))
 	}
 
+	// Report the manager's OBSERVED behavior. Only a decision of "blocked" is
+	// prevention (Blocked=true); "logged-only" is detection without prevention
+	// (a monitor control) and must not be reported as a block; "allowed"/none is
+	// neither. This keeps EDR evidence honest about monitor vs block.
 	detectedIDs := res.EDRObservation.Response.DetectedRuleIDs
-	detected := len(detectedIDs) > 0
-	if detected {
+	ids := strings.Join(detectedIDs, ",")
+	switch strings.ToLower(strings.TrimSpace(res.Control.ControlDecision)) {
+	case "blocked":
 		out.Actual = Actual{
-			Blocked:       true,
-			ReachedApp:    false,
-			MatchedRuleID: strings.Join(detectedIDs, ","),
-			Detail:        fmt.Sprintf("Wazuh raised alert(s) for the injected activity (rules %s); control decision %q", strings.Join(detectedIDs, ","), res.Control.ControlDecision),
+			Blocked: true, ReachedApp: false, MatchedRuleID: ids,
+			Detail: fmt.Sprintf("Wazuh observed prevention for the injected activity (rules %s); control decision blocked", ids),
 		}
 		out.TerminalState = stateBlocked
-		out.Steps = append(out.Steps, "observed detection: rules "+strings.Join(detectedIDs, ","))
-	} else {
+		out.Steps = append(out.Steps, "observed prevention (blocked): rules "+ids)
+	case "logged-only":
 		out.Actual = Actual{
-			Blocked:    false,
-			ReachedApp: true,
-			Detail:     "Wazuh raised no alert for the injected activity; not detected/prevented",
+			Blocked: false, ReachedApp: true, MatchedRuleID: ids,
+			Detail: fmt.Sprintf("Wazuh DETECTED but did not prevent the injected activity (rules %s); control decision logged-only (monitor)", ids),
 		}
 		out.TerminalState = stateNotBlocked
-		out.Steps = append(out.Steps, "observed no detection for the injected activity")
+		out.Steps = append(out.Steps, "observed detection without prevention (logged-only): rules "+ids)
+		out.Limitations = append(out.Limitations, "candidate detected the activity but did not block it (monitor); not a prevention")
+	default: // allowed / no-decision / unknown
+		out.Actual = Actual{
+			Blocked: false, ReachedApp: true, MatchedRuleID: ids,
+			Detail: "Wazuh neither detected nor prevented the injected activity",
+		}
+		out.TerminalState = stateNotBlocked
+		out.Steps = append(out.Steps, "observed no detection or prevention for the injected activity")
 	}
 
 	out.Match = out.Actual.Blocked && (out.Actual.Blocked == out.Expected.Blocked)
-	verdict := "DETECTED"
-	if !out.Actual.Blocked {
-		verdict = "NOT DETECTED"
-	}
 	agree := "matches"
 	if !out.Match {
 		agree = "does NOT match"
 	}
-	out.ProseSummary = fmt.Sprintf("Wazuh EDR candidate %s the injected command on a live agent; actual %s expected.", verdict, agree)
+	out.ProseSummary = fmt.Sprintf("Wazuh EDR candidate observed decision %q on a live agent; actual %s expected.", res.Control.ControlDecision, agree)
 	if test.ProofBasis == "mitigation-discriminator" && out.TerminalState == stateBlocked {
-		out.Limitations = append(out.Limitations, "indirect proof: only discriminator activity was proven detected (LLD §7.3)")
+		out.Limitations = append(out.Limitations, "indirect proof: only discriminator activity was proven blocked (LLD §7.3)")
 	}
 	return out
 }
