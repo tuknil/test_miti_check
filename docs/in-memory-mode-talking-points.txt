@@ -1,0 +1,94 @@
+================================================================================
+  mitigation-check — "In-memory" execution mode: talking points
+================================================================================
+
+ELEVATOR PITCH (10 seconds)
+- "In-memory" runs the entire mitigation check INSIDE the API process — no
+  container, no cloud, no network. It proves whether the candidate rule blocks
+  the supplied attack, in milliseconds, and it runs anywhere.
+
+
+WHAT IT IS (plain terms)
+- Every run does the same thing: take one mitigation rule + one test attack,
+  decide "blocked" or "not-blocked," and record it.
+- Most modes bring up a REAL vulnerable container as the target. In-memory skips
+  the container entirely: it stands up a tiny fake target inside the API and runs
+  the rule against the request in process.
+- Think of it as the "unit-test speed" mode.
+
+
+HOW IT WORKS (step by step)
+1. On submit, the API starts a small in-process HTTP server on a loopback port
+   (127.0.0.1) — this is the stand-in for the protected app. No Docker involved.
+2. It applies the SAME in-memory WAF engine every mode uses: it parses the
+   candidate's actual ModSecurity SecRule (its regex pattern, the fields it
+   inspects, and its deny/status action).
+3. It runs the supplied test request through that rule:
+   - If the rule MATCHES  -> the request is denied (403). It's "blocked," and the
+     request never reaches the stand-in target.
+   - If the rule does NOT match -> the request is forwarded to the in-process
+     target, which answers 200. That's "not-blocked" (the attack got through).
+4. It compares actual vs expected, writes the verdict, and stores the run in the
+   ledger (Postgres) — exactly the same record shape as any other mode.
+5. Teardown is instant (the in-process server is just closed).
+
+
+WHY IT'S USEFUL / WHEN TO USE IT
+- Fast: milliseconds instead of ~20-40s to pull and boot a container.
+- Zero dependencies: no Docker socket, no cloud account, no network egress.
+- Runs ANYWHERE the API runs — including Azure Container Apps and CI pipelines,
+  where you can't launch sibling containers.
+- Ideal for: iterating on WAF rules, regression/unit testing rule logic,
+  quick demos, and environments that are locked down.
+
+
+THE HONEST TRADE-OFF (say this proactively)
+- The target is a lightweight STAND-IN, not the real CVE-vulnerable image.
+- So in-memory validates the RULE LOGIC — does this rule catch this request —
+  not that the real vulnerable binary was exercised.
+- It is therefore a WEAKER proof than the "local" or "aci" modes, which run the
+  actual vulnerable container.
+- Important nuance: for the block decision this barely matters — a blocked
+  request never touches the target anyway, and the "not-blocked" check only
+  needs the target to answer. What you give up is the "ran against the real
+  vulnerable app" assurance.
+- One-liner: "Same verdict logic, faster and portable — but it proves the rule,
+  not the real target."
+
+
+HOW IT FITS THE BIGGER PICTURE
+- In-memory is one of several interchangeable execution modes (a UI toggle):
+  local Docker, in-memory, firewall (L3/L4), Azure ACI, ACI via service
+  principal, GitHub Actions, and GitHub-with-GHCR-relay.
+- The rule evaluation and the verdict are identical across all of them; only
+  WHERE/HOW the target is brought up differs. In-memory is the "nowhere — just
+  in the process" option.
+
+
+QUICK DEMO (what to show)
+- Pick the "In-memory" toggle, submit the true-positive scenario -> comes back
+  "blocked, matches expected" almost instantly, with a step log showing:
+  "started in-memory substrate ... / WAF matched rule ... -> connection blocked."
+- Then submit a benign or bypass case -> "not-blocked," showing the request
+  reached the in-process stand-in (it replies "Hello, world! (in-memory substrate)").
+
+
+LIKELY QUESTIONS & ANSWERS
+Q: Is it actually testing anything real?
+A: It's testing the real rule (the exact ModSecurity SecRule) against the real
+   request. What's simulated is the target app, not the rule.
+
+Q: Why not always use it then?
+A: For a high-assurance proof you want the real vulnerable container (local/aci).
+   In-memory is the fast, portable, lower-fidelity check.
+
+Q: Does it need Docker or Azure?
+A: No. Nothing external. That's the whole point.
+
+Q: Is the result stored like the others?
+A: Yes — same immutable request + response in the Postgres ledger.
+
+Q: Can it run on ACA?
+A: Yes. It's one of the modes that needs no docker.sock, so it runs anywhere the
+   API runs.
+================================================================================

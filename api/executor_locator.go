@@ -190,12 +190,19 @@ func executeScenarioByLocator(ctx context.Context, req SubmitMitigationCheckRequ
 	req.CandidateArtifactID = resolved.Candidate.RuleID
 	req.TestBasisID = resolved.Provenance.SelectedTestBasisID
 	req.CheckProfileID = "mitigation-check-profile:waf-http:1"
+	hydrationStep := "hydrated registered WAF candidate and HTTP mitigation test basis"
+	// An EDR candidate runs on the in-memory Wazuh evaluator against telemetry.
+	if resolved.Candidate.Engine == "wazuh" {
+		req.ExecutionMode = execEDR
+		req.CheckProfileID = "mitigation-check-profile:edr-telemetry:1"
+		hydrationStep = "hydrated registered EDR (Wazuh) candidate and telemetry mitigation test basis"
+	}
 	req.Candidate, _ = json.Marshal(resolved.Candidate)
 	req.TestBasis, _ = json.Marshal(resolved.TestBasis)
 	out := executeScenario(ctx, req, runID, resultID)
 	out.InputProvenance = &resolved.Provenance
 	out.EvidenceRefs = append([]string(nil), resolved.EvidenceRefs...)
-	out.Steps = append([]string{"verified immutable Defense Generation and Check Generation locators", "hydrated registered WAF candidate and HTTP mitigation test basis"}, out.Steps...)
+	out.Steps = append([]string{"verified immutable Defense Generation and Check Generation locators", hydrationStep}, out.Steps...)
 	return out
 }
 
@@ -258,7 +265,15 @@ func (r *databricksLocatorResolver) Resolve(ctx context.Context, defense, check 
 	if err != nil {
 		return resolvedLocatorInputs{}, err
 	}
-	basisID, basis, err := selectRegisteredHTTPTestBasis(runResult, selectedTestBasisID)
+	// Test-basis selection follows the candidate's evaluator: an HTTP sample for
+	// WAF, a decoded telemetry event for EDR.
+	var basisID string
+	var basis TestBasisSpec
+	if candidate.Engine == "wazuh" {
+		basisID, basis, err = selectEDRTestBasis(runResult, selectedTestBasisID)
+	} else {
+		basisID, basis, err = selectRegisteredHTTPTestBasis(runResult, selectedTestBasisID)
+	}
 	if err != nil {
 		return resolvedLocatorInputs{}, err
 	}
@@ -602,8 +617,8 @@ func verifyDefenseRow(row defenseRow, locator ImmutableResultLocator) (Candidate
 		return CandidateSpec{}, nil, fmt.Errorf("Defense Generation physical/logical integrity verification failed")
 	}
 	pc := result.PrimaryCandidate
-	if pc == nil || pc.ArtifactType != "modsecurity-rule" || strings.TrimSpace(pc.CandidateID) == "" || strings.TrimSpace(pc.ArtifactContent) == "" {
-		return CandidateSpec{}, nil, fmt.Errorf("Defense Generation result has no supported ModSecurity candidate")
+	if pc == nil || strings.TrimSpace(pc.CandidateID) == "" || strings.TrimSpace(pc.ArtifactContent) == "" {
+		return CandidateSpec{}, nil, fmt.Errorf("Defense Generation result has no usable candidate")
 	}
 	if pc.ArtifactHash != sha256Value([]byte(pc.ArtifactContent)) {
 		return CandidateSpec{}, nil, fmt.Errorf("Defense Generation candidate artifact_hash differs from artifact_content")
@@ -612,7 +627,15 @@ func verifyDefenseRow(row defenseRow, locator ImmutableResultLocator) (Candidate
 	for _, ref := range result.UpstreamResultRefs {
 		evidence = stableStringUnion(evidence, ref.EvidenceRefs)
 	}
-	return CandidateSpec{Kind: "waf-rule", Engine: "modsecurity", RuleID: pc.CandidateID, Rule: pc.ArtifactContent, Action: deriveRuleAction(pc.ArtifactContent)}, evidence, nil
+	// The evaluator is chosen by the candidate's artifact type / control class.
+	switch pc.ArtifactType {
+	case "modsecurity-rule":
+		return CandidateSpec{Kind: "waf-rule", Engine: "modsecurity", RuleID: pc.CandidateID, Rule: pc.ArtifactContent, Action: deriveRuleAction(pc.ArtifactContent)}, evidence, nil
+	case "wazuh-rule":
+		return CandidateSpec{Kind: "endpoint-detection-rule", Engine: "wazuh", RuleID: pc.CandidateID, Rule: pc.ArtifactContent, Action: "kill-process"}, evidence, nil
+	default:
+		return CandidateSpec{}, nil, fmt.Errorf("Defense Generation result has no supported candidate (artifact_type=%q)", pc.ArtifactType)
+	}
 }
 
 func sameDefenseResultRef(ref defenseResultRef, locator upstreamRef) bool {

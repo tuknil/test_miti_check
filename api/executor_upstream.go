@@ -23,6 +23,7 @@ import (
 	"log"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -61,11 +62,26 @@ type upstreamInput struct {
 	EvidenceRefs []string    `json:"evidence_refs"`
 }
 
+func getEnvBool(key string, fallback bool) bool {
+	valStr, ok := os.LookupEnv(key)
+	if !ok {
+		return fallback
+	}
+
+	val, err := strconv.ParseBool(valStr)
+	if err != nil {
+		return fallback
+	}
+
+	return val
+}
+
 // executeScenarioUpstream resolves the rule (and, when needed, the test) from
 // Databricks and delegates the run to the shared executor. Any resolution failure
 // is a could-not-test (never a fabricated verdict).
 func executeScenarioUpstream(ctx context.Context, req SubmitMitigationCheckRequest, runID, resultID string) RunOutcome {
 	base := RunOutcome{RunID: runID, ResultID: resultID}
+	//wazuhSynthetic := getEnvBool("WAZUH_SYNTHETIC", false)
 
 	entries, err := parseUpstreamInputs(req.UpstreamInputs)
 	if err != nil {
@@ -102,13 +118,19 @@ func executeScenarioUpstream(ctx context.Context, req SubmitMitigationCheckReque
 	if cand.Kind == "firewall-rule" && req.ExecutionMode != execFirewall {
 		req.ExecutionMode = execFirewall
 	}
+	// An EDR candidate runs on the in-memory Wazuh evaluator against telemetry.
+	if cand.Kind == "endpoint-detection-rule" && req.ExecutionMode != execEDR {
+		req.ExecutionMode = execEDR
+	}
 	steps := []string{
 		"read " + cand.Kind + " from Databricks " + ruleEntry.ResultRef.qualified() +
 			" where result_id=" + ruleEntry.ResultRef.Key,
 	}
 
 	// Test: an inline test_basis wins; otherwise derive it from the check-generation
-	// entry's run_result via the standalone stimulus converter.
+	// entry's run_result. WAF/firewall use the HTTP stimulus converter; EDR uses the
+	// endpoint signal selector (a command synthesized into telemetry, or a decoded
+	// telemetry event).
 	if len(req.TestBasis) == 0 {
 		if checkEntry := selectByCapability(entries, capCheckGeneration); checkEntry != nil {
 			runResult, err := dbxReader.ReadRunResult(ctx, checkEntry.ResultRef)
@@ -116,13 +138,20 @@ func executeScenarioUpstream(ctx context.Context, req SubmitMitigationCheckReque
 				return couldNotTest(base, "could not read run_result from Databricks "+checkEntry.ResultRef.qualified()+
 					" where result_id="+checkEntry.ResultRef.Key+": "+err.Error())
 			}
-			stim, err := parseStimulus(runResult)
-			if err != nil {
-				return couldNotTest(base, "check-generation run_result: "+err.Error())
-			}
-			tb, err := TestBasisFromStimulus(stim)
-			if err != nil {
-				return couldNotTest(base, "convert stimulus to test_basis: "+err.Error())
+			var tb TestBasisSpec
+			if cand.Kind == "endpoint-detection-rule" {
+				_, tb, err = selectEDRTestBasis(runResult, strings.TrimSpace(req.TestBasisID))
+				if err != nil {
+					return couldNotTest(base, "check-generation EDR test basis: "+err.Error())
+				}
+			} else {
+				stim, serr := parseStimulus(runResult)
+				if serr != nil {
+					return couldNotTest(base, "check-generation run_result: "+serr.Error())
+				}
+				if tb, err = TestBasisFromStimulus(stim); err != nil {
+					return couldNotTest(base, "convert stimulus to test_basis: "+err.Error())
+				}
 			}
 			if b, e := json.Marshal(tb); e == nil {
 				req.TestBasis = b
@@ -150,9 +179,21 @@ func candidateKind(pc PrimaryCandidate, rule string) string {
 		return "firewall-rule"
 	case "waf":
 		return "waf-rule"
+	case "edr":
+		return "endpoint-detection-rule"
 	}
-	if strings.HasPrefix(strings.TrimSpace(rule), "SecRule") || strings.Contains(rule, "@rx") {
+	switch strings.ToLower(strings.TrimSpace(pc.ArtifactType)) {
+	case "wazuh-rule":
+		return "endpoint-detection-rule"
+	case "modsecurity-rule":
 		return "waf-rule"
+	}
+	r := strings.TrimSpace(rule)
+	if strings.HasPrefix(r, "SecRule") || strings.Contains(rule, "@rx") {
+		return "waf-rule"
+	}
+	if strings.Contains(r, "<rule ") || strings.Contains(r, "<group") || strings.Contains(rule, "decoded_as") {
+		return "endpoint-detection-rule"
 	}
 	return "firewall-rule"
 }
@@ -168,6 +209,8 @@ func candidateEngine(pc PrimaryCandidate, rule string) string {
 		return "modsecurity"
 	case strings.Contains(rule, "-j ") || strings.Contains(rule, "iptables"):
 		return "iptables"
+	case strings.Contains(rule, "<rule ") || strings.Contains(rule, "<group") || strings.Contains(rule, "decoded_as"):
+		return "wazuh"
 	}
 	return ""
 }
