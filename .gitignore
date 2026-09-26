@@ -8,3 +8,9 @@ api/data/
 
 # Editor swap files
 *.swp
+
+# IDE config
+.idea/
+
+# Compiled API binary (build artifact)
+api/mitigation-check-api

@@ -1,0 +1,121 @@
+================================================================================
+  mitigation-check — Firewall (in-memory) checks: talking points
+================================================================================
+
+ELEVATOR PITCH (10 seconds)
+- The firewall check evaluates NETWORK firewall rules (L3/L4 — IPs, ports,
+  protocols), not web/WAF rules. It decides IN-PROCESS whether a given firewall
+  rule would block a given network connection — no target, no container, instant.
+- It understands both a simple compact syntax AND real iptables rules.
+
+
+WHAT IT IS (plain terms)
+- The WAF check is layer 7: a rule vs an HTTP request.
+- The firewall check is layers 3/4: a rule vs a connection (source IP,
+  destination IP, destination port, protocol).
+- It's a completely separate evaluator — no vulnerable app, no substrate, and no
+  packets actually sent. It reasons about the connection 5-tuple in memory.
+
+
+HOW IT WORKS (step by step)
+1. The candidate is a firewall rule, in one of two accepted syntaxes:
+   a) Compact:  <action> <proto> <src> -> <dst>[:<port | lo-hi | *>]
+        deny tcp any -> any:1389
+   b) iptables (set engine "iptables", or any rule with -j):
+        -A OUTPUT -p tcp -d 198.51.100.7 --dport 1389 -j DROP
+        -A OUTPUT -p tcp -m multiport --dports 389,636,1099,1389 -j DROP
+2. The test is a network connection to evaluate, e.g.
+        tcp  10.0.0.5  ->  198.51.100.7 : 1389
+3. The engine parses the rule (protocol, source, destination as IP/CIDR, and the
+   destination port — single, a range, or a multiport list) and checks whether
+   the connection matches ALL of those.
+4. Verdict:
+   - rule MATCHES and action is deny (DROP/REJECT) -> "blocked"
+   - otherwise (no match, or an ACCEPT)            -> "not-blocked"
+5. It compares actual vs expected, writes the verdict, and stores the run in the
+   ledger (Postgres) — same record shape as every other mode.
+
+
+IPTABLES SUPPORT (the new part — worth calling out)
+- You can paste REAL iptables rules; no translation needed.
+- Parsed flags: -A/-I <chain>, -p <proto>, -s <src>, -d <dst> (IP or CIDR),
+  --dport <port|lo:hi>, -m multiport --dports <list>, -j DROP|REJECT|ACCEPT.
+- DROP/REJECT map to "deny"; ACCEPT maps to "allow". Unrecognized flags are
+  ignored so realistic rules still parse.
+- It's still evaluated IN MEMORY — no kernel, no NET_ADMIN, no privileges — so it
+  runs anywhere the API runs (including Azure Container Apps and CI).
+
+
+WHY IT FITS LOG4SHELL (the story to tell)
+- Log4Shell exploitation makes the victim app open an OUTBOUND connection to the
+  attacker's JNDI server (LDAP/RMI, e.g. port 1389) to fetch the payload.
+- An EGRESS firewall rule that denies that outbound connection is a real, valid
+  mitigation — even if the WAF missed the request, the exploit's callback can't
+  reach the attacker.
+- Defense in depth: the WAF blocks the request at the edge; the firewall blocks
+  the exploit's phone-home at the network.
+
+
+THE FOUR SHIPPED SCENARIOS
+- scenarios/05  compact TP: deny :1389, callback to :1389  -> blocked (match).
+- scenarios/06  compact FN: deny :389 only, callback :1389 -> not-blocked (miss).
+- scenarios/09  iptables TP: -m multiport --dports 389,636,1099,1389 -j DROP,
+                 callback :1389 -> blocked (match).
+- scenarios/10  iptables FN: --dport 389 -j DROP, callback :1389 -> not-blocked
+                 (the too-narrow rule misses the non-standard port).
+- The two "miss" cases are the teaching moment: right idea, wrong port coverage.
+
+
+WHY IT'S USEFUL / WHEN TO USE IT
+- Instant and dependency-free: no container, no cloud, no packets on the wire.
+- Validate firewall / egress rule LOGIC — did we scope the ports and addresses
+  correctly? Does this rule actually cover the attacker's callback ports?
+- Great for reviewing iptables rules before they ship, and for CI.
+
+
+THE HONEST TRADE-OFF (say this proactively)
+- It evaluates the rule's MATCHING LOGIC against a described connection; it does
+  not open a real socket or watch a live kernel enforce the rule.
+- So it proves "this rule, as written, would block this connection" — not that a
+  specific production firewall is deployed and enforcing.
+- One-liner: "It proves the rule's coverage, not the live enforcement."
+
+
+HOW IT DIFFERS FROM "IN-MEMORY" (WAF) MODE — likely follow-up
+- "in-memory" = layer 7, WAF rule vs an HTTP request, against an in-process
+  stand-in web app.
+- "firewall"  = layer 3/4, firewall rule (compact or iptables) vs a network
+  connection — pure rule evaluation, no target at all.
+- Both are in-process and instant; they answer different questions.
+
+
+QUICK DEMO (what to show)
+- Pick "Firewall (in-memory)", paste scenarios/09 (an iptables multiport DROP)
+  -> "blocked, matches expected," step log: "firewall DENY matched -> blocked."
+- Paste scenarios/10 (iptables --dport 389 only) -> "not-blocked, does NOT match"
+  — the narrow rule let the :1389 callback through.
+
+
+LIKELY QUESTIONS & ANSWERS
+Q: Does it run iptables / send real traffic?
+A: No. It parses the rule and evaluates it against the connection's 5-tuple in
+   memory. Nothing is applied to the kernel and no packets are sent.
+
+Q: Do I have to rewrite my iptables rules into a custom format?
+A: No — paste them as-is. It also accepts a simpler compact syntax if you prefer.
+
+Q: Which iptables features are supported?
+A: chain (-A/-I), -p, -s, -d (IP/CIDR), --dport (single or lo:hi range),
+   -m multiport --dports (list), and -j DROP/REJECT/ACCEPT.
+
+Q: Is this the same as the WAF check?
+A: No — different layer. WAF is HTTP (layer 7); this is IP/port/protocol
+   (layers 3/4). Separate evaluator, separate scenarios.
+
+Q: Why does it matter if the WAF already blocks Log4Shell?
+A: Defense in depth. If the WAF is bypassed, an egress rule denying the JNDI
+   callback still stops the exploit from fetching its payload.
+
+Q: Is the result stored like the others?
+A: Yes — same immutable request + response in the Postgres ledger.
+================================================================================
