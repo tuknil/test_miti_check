@@ -270,7 +270,7 @@ func (r *databricksLocatorResolver) Resolve(ctx context.Context, defense, check 
 	var basisID string
 	var basis TestBasisSpec
 	if candidate.Engine == "wazuh" {
-		basisID, basis, err = selectEDRTelemetryTestBasis(runResult, selectedTestBasisID)
+		basisID, basis, err = selectEDRTestBasis(runResult, selectedTestBasisID)
 	} else {
 		basisID, basis, err = selectRegisteredHTTPTestBasis(runResult, selectedTestBasisID)
 	}

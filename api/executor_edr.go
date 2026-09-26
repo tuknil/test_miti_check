@@ -156,19 +156,23 @@ func runEDRInMemory(ctx context.Context, req SubmitMitigationCheckRequest, out R
 	return out
 }
 
-// ---- locator: EDR telemetry test-basis selection ----
+// ---- EDR test-basis selection (upstream + locator) ----
 
 // edrCheckProjection is the (tolerant) EDR view of a Check Generation run_result:
-// a mitigation-checkable telemetry signal carrying a decoded event and expected
-// outcome. NOTE: the EDR check-generation contract is not yet fixtured here, so
-// this reads a superset shape (telemetry|event|decoded_event) and defaults the
-// expected outcome to detected when the producer omits it.
+// a mitigation-checkable endpoint signal carrying either a command (synthesized
+// into telemetry) or a decoded event, plus the expected outcome. NOTE: the EDR
+// check-generation contract is not yet fixtured here, so this reads a superset
+// shape (command | telemetry|event|decoded_event) and defaults the expected
+// outcome to detected when the producer omits it.
 type edrCheckProjection struct {
 	Artifacts []struct {
 		ArtifactID   string `json:"artifact_id"`
 		ArtifactKind string `json:"artifact_kind"`
 		Signal       *struct {
 			CandidateFamily string          `json:"candidate_family"`
+			Command         string          `json:"command"`
+			CommandUser     string          `json:"command_user"`
+			CommandHost     string          `json:"command_host"`
 			Telemetry       json.RawMessage `json:"telemetry"`
 			Event           json.RawMessage `json:"event"`
 			DecodedEvent    json.RawMessage `json:"decoded_event"`
@@ -177,10 +181,10 @@ type edrCheckProjection struct {
 	} `json:"artifacts"`
 }
 
-// selectEDRTelemetryTestBasis picks a telemetry mitigation signal from a Check
-// Generation run_result and builds the EDR test basis. Mirrors
-// selectRegisteredHTTPTestBasis for the WAF path.
-func selectEDRTelemetryTestBasis(runResult json.RawMessage, selectedID string) (string, TestBasisSpec, error) {
+// selectEDRTestBasis picks an endpoint mitigation signal from a Check Generation
+// run_result and builds the EDR test basis — a command (preferred) or a decoded
+// telemetry event. Mirrors selectRegisteredHTTPTestBasis for the WAF path.
+func selectEDRTestBasis(runResult json.RawMessage, selectedID string) (string, TestBasisSpec, error) {
 	var projection edrCheckProjection
 	if err := json.Unmarshal(runResult, &projection); err != nil {
 		return "", TestBasisSpec{}, fmt.Errorf("decode Check Generation run_result: %w", err)
@@ -193,29 +197,31 @@ func selectEDRTelemetryTestBasis(runResult json.RawMessage, selectedID string) (
 			continue
 		}
 		fam := strings.ToLower(strings.TrimSpace(artifact.Signal.CandidateFamily))
-		if fam != "edr-telemetry" && fam != "endpoint-signal" && fam != "endpoint-telemetry" {
+		if fam != "edr-command" && fam != "edr-telemetry" && fam != "endpoint-signal" && fam != "endpoint-telemetry" {
 			continue
 		}
+		command := strings.TrimSpace(artifact.Signal.Command)
 		telemetry := firstNonEmptyRaw(artifact.Signal.Telemetry, artifact.Signal.Event, artifact.Signal.DecodedEvent)
-		if len(telemetry) == 0 {
+		if command == "" && len(telemetry) == 0 {
 			continue
 		}
 		expected := artifact.Signal.Expected
 		if expected.Blocked == nil {
-			detected := true // an EDR proof's discriminator telemetry is expected to be detected
+			detected := true // an EDR proof's discriminator activity is expected to be detected
 			expected.Blocked = &detected
 		}
-		return artifact.ArtifactID, TestBasisSpec{
-			Kind:       "edr-telemetry",
-			ProofBasis: "mitigation-discriminator",
-			Telemetry:  telemetry,
-			Expected:   expected,
-		}, nil
+		tb := TestBasisSpec{ProofBasis: "mitigation-discriminator", Expected: expected}
+		if command != "" {
+			tb.Kind, tb.Command, tb.CommandUser, tb.CommandHost = "edr-command", command, artifact.Signal.CommandUser, artifact.Signal.CommandHost
+		} else {
+			tb.Kind, tb.Telemetry = "edr-telemetry", telemetry
+		}
+		return artifact.ArtifactID, tb, nil
 	}
 	if selectedID != "" {
-		return "", TestBasisSpec{}, fmt.Errorf("selected test_basis_id %q is not an eligible EDR telemetry artifact", selectedID)
+		return "", TestBasisSpec{}, fmt.Errorf("selected test_basis_id %q is not an eligible EDR mitigation artifact", selectedID)
 	}
-	return "", TestBasisSpec{}, fmt.Errorf("Check Generation produced no supported EDR telemetry test basis")
+	return "", TestBasisSpec{}, fmt.Errorf("Check Generation produced no supported EDR test basis (command or telemetry)")
 }
 
 func firstNonEmptyRaw(raws ...json.RawMessage) json.RawMessage {

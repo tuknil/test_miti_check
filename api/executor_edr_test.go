@@ -143,14 +143,30 @@ func TestVerifyDefenseRowAcceptsWazuh(t *testing.T) {
 	}
 }
 
-// selectEDRTelemetryTestBasis extracts a telemetry signal from a check run_result.
+// selectEDRTestBasis extracts a telemetry signal from a check run_result.
 func TestSelectEDRTelemetryTestBasis(t *testing.T) {
 	runResult := json.RawMessage(`{"artifacts":[{"artifact_id":"sig-1","artifact_kind":"mitigation-checkable-signal","mitigation_checkable_signal":{"candidate_family":"edr-telemetry","telemetry":{"event":{"type":"Process Creation"},"src":{"process":{"cmdline":"x -EncodedCommand y"}}}}}]}`)
-	id, basis, err := selectEDRTelemetryTestBasis(runResult, "")
+	id, basis, err := selectEDRTestBasis(runResult, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if id != "sig-1" || len(basis.Telemetry) == 0 || basis.Expected.Blocked == nil || !*basis.Expected.Blocked {
 		t.Fatalf("unexpected basis: id=%s telemetry=%s expected=%+v", id, basis.Telemetry, basis.Expected)
+	}
+}
+
+// selectEDRTestBasis extracts a command signal (the upstream/check-generation EDR
+// path) and produces a command test basis.
+func TestSelectEDRCommandTestBasis(t *testing.T) {
+	runResult := json.RawMessage(`{"artifacts":[{"artifact_id":"sig-c","artifact_kind":"mitigation-checkable-signal","mitigation_checkable_signal":{"candidate_family":"edr-command","command":"adduser eve","command_user":"root"}}]}`)
+	id, basis, err := selectEDRTestBasis(runResult, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != "sig-c" || basis.Command != "adduser eve" || basis.CommandUser != "root" || basis.Kind != "edr-command" {
+		t.Fatalf("unexpected command basis: %+v", basis)
+	}
+	if basis.Expected.Blocked == nil || !*basis.Expected.Blocked {
+		t.Fatalf("expected default blocked=true, got %+v", basis.Expected)
 	}
 }
