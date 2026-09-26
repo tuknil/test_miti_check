@@ -122,14 +122,18 @@ type CandidateSpec struct {
 }
 
 // TestBasisSpec is the inline attack/discriminator sample and expected outcome.
-// Request carries the HTTP sample (WAF); Telemetry carries a decoded telemetry
-// event (EDR). Exactly one is populated, per the candidate's control class.
+// Request carries the HTTP sample (WAF). For EDR, the test basis is either a
+// Command (a Linux command line, synthesized into the Wazuh telemetry it would
+// generate) or a decoded Telemetry event supplied directly.
 type TestBasisSpec struct {
-	Kind       string          `json:"kind"`
-	ProofBasis string          `json:"proof_basis"`
-	Request    TestRequest     `json:"request"`
-	Telemetry  json.RawMessage `json:"telemetry,omitempty"`
-	Expected   TestExpected    `json:"expected"`
+	Kind        string          `json:"kind"`
+	ProofBasis  string          `json:"proof_basis"`
+	Request     TestRequest     `json:"request"`
+	Telemetry   json.RawMessage `json:"telemetry,omitempty"`
+	Command     string          `json:"command,omitempty"`      // EDR: Linux command → synthesized telemetry
+	CommandUser string          `json:"command_user,omitempty"` // EDR: user the command runs as (default root)
+	CommandHost string          `json:"command_host,omitempty"` // EDR: host/agent name (default linux-host)
+	Expected    TestExpected    `json:"expected"`
 }
 
 type TestRequest struct {

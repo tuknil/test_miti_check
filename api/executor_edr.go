@@ -48,9 +48,6 @@ func runEDRInMemory(ctx context.Context, req SubmitMitigationCheckRequest, out R
 	if err := json.Unmarshal(nonNil(req.TestBasis), &test); err != nil || test.Expected.Blocked == nil {
 		return couldNotTest(out, "telemetry test basis / expected outcome not provided in request body")
 	}
-	if len(test.Telemetry) == 0 {
-		return couldNotTest(out, "decoded telemetry event not provided in test basis (test_basis.telemetry)")
-	}
 	out.Expected = Expected{
 		Classification: test.Expected.Classification,
 		Blocked:        *test.Expected.Blocked,
@@ -58,6 +55,35 @@ func runEDRInMemory(ctx context.Context, req SubmitMitigationCheckRequest, out R
 	}
 	out.TestBasis = &test
 	out.Substrate.Image = "endpoint telemetry (in-memory Wazuh)"
+
+	// Resolve the telemetry to evaluate the rule against: for an EDR test basis a
+	// command is synthesized into the Wazuh telemetry it would generate (the full
+	// footprint: execve + child processes + FIM); otherwise a decoded telemetry
+	// event is supplied directly.
+	type edrItem struct {
+		summary string
+		event   *wazuh.Event
+	}
+	var items []edrItem
+	switch {
+	case strings.TrimSpace(test.Command) != "":
+		footprint, ferr := wazuh.CommandTelemetryFootprint(wazuh.CommandInput{
+			Command: test.Command,
+			User:    firstNonEmpty(test.CommandUser, "root"),
+			Host:    firstNonEmpty(test.CommandHost, "linux-host"),
+		})
+		if ferr != nil {
+			return couldNotTest(out, "could not synthesize telemetry from command: "+ferr.Error())
+		}
+		for _, e := range footprint {
+			items = append(items, edrItem{summary: e.Summary, event: wazuh.LoadEvent(e.Event)})
+		}
+		out.Steps = append(out.Steps, fmt.Sprintf("synthesized %d telemetry event(s) from command %q", len(items), test.Command))
+	case len(test.Telemetry) > 0:
+		items = append(items, edrItem{summary: "supplied telemetry", event: wazuh.LoadEvent(test.Telemetry)})
+	default:
+		return couldNotTest(out, "EDR test basis must provide a command (test_basis.command) or decoded telemetry (test_basis.telemetry)")
+	}
 
 	rules, err := wazuh.ParseRules([]byte(cand.Rule))
 	if err != nil {
@@ -68,22 +94,28 @@ func runEDRInMemory(ctx context.Context, req SubmitMitigationCheckRequest, out R
 	}
 	out.Steps = append(out.Steps, fmt.Sprintf("parsed Wazuh ruleset (%d rule(s)); native action %q", len(rules), firstNonEmpty(cand.Action, "detect")))
 
-	ev := wazuh.LoadEvent(test.Telemetry)
-
+	// The rule fires if any rule matches any of the synthesized telemetry events.
 	matched := false
 	matchedRuleID := ""
 	matchedConds := 0
+	matchedOn := ""
 	for _, r := range rules {
-		res := wazuh.Evaluate(r, ev)
-		if res.Matched {
-			matched = true
-			matchedRuleID = res.RuleID
-			for _, c := range res.Conditions {
-				if c.Matched {
-					matchedConds++
+		for _, it := range items {
+			res := wazuh.Evaluate(r, it.event)
+			if res.Matched {
+				matched = true
+				matchedRuleID = res.RuleID
+				matchedOn = it.summary
+				for _, c := range res.Conditions {
+					if c.Matched {
+						matchedConds++
+					}
 				}
+				break
 			}
-			break // first matching rule fires the detection
+		}
+		if matched {
+			break
 		}
 	}
 
@@ -92,7 +124,7 @@ func runEDRInMemory(ctx context.Context, req SubmitMitigationCheckRequest, out R
 			Blocked:       true,
 			ReachedApp:    false,
 			MatchedRuleID: matchedRuleID,
-			Detail:        fmt.Sprintf("Wazuh rule %s matched the telemetry (%d condition(s)); endpoint action %q would fire", matchedRuleID, matchedConds, firstNonEmpty(cand.Action, "detect")),
+			Detail:        fmt.Sprintf("Wazuh rule %s matched telemetry [%s] (%d condition(s)); endpoint action %q would fire", matchedRuleID, matchedOn, matchedConds, firstNonEmpty(cand.Action, "detect")),
 		}
 		out.TerminalState = stateBlocked
 		out.Steps = append(out.Steps, "Wazuh rule "+matchedRuleID+" matched telemetry -> detected/prevented")

@@ -23,6 +23,61 @@ func edrRequest(t *testing.T, telemetry string, blocked bool) SubmitMitigationCh
 		Candidate: cand, TestBasis: tb}
 }
 
+// edrCommandRequest builds an EDR request whose test basis is a command (the
+// telemetry is synthesized from it).
+func edrCommandRequest(rule, command string, blocked bool) SubmitMitigationCheckRequest {
+	cand, _ := json.Marshal(CandidateSpec{Kind: "endpoint-detection-rule", Engine: "wazuh", Rule: rule, Action: "kill-process"})
+	tb, _ := json.Marshal(TestBasisSpec{Kind: "edr-command", ProofBasis: "mitigation-discriminator",
+		Command: command, Expected: TestExpected{Blocked: &blocked}})
+	return SubmitMitigationCheckRequest{ContractID: contractID, RequestID: "edr-cmd", CorrelationID: "correlation-1",
+		Candidate: cand, TestBasis: tb}
+}
+
+const edrAuditExecRule = `<group name="audit,">
+  <rule id="80785" level="8">
+    <decoded_as>auditd</decoded_as>
+    <field name="audit.execve.a0">^adduser$</field>
+    <description>User account creation via adduser</description>
+  </rule>
+</group>`
+
+const edrAuditFIMRule = `<group name="syscheck,">
+  <rule id="80790" level="7">
+    <field name="syscheck.path">^/etc/passwd$</field>
+    <field name="syscheck.event">modified</field>
+    <description>/etc/passwd modified</description>
+  </rule>
+</group>`
+
+// EDR command test basis: the command is synthesized into telemetry, and the rule
+// matches its execve event.
+func TestEDRCommandMatchesExecve(t *testing.T) {
+	out := executeScenario(context.Background(), edrCommandRequest(edrAuditExecRule, "adduser eve", true), "run-c1", "result-c1")
+	if out.TerminalState != stateBlocked || !out.Actual.Blocked {
+		t.Fatalf("expected detected/blocked for adduser command, got %s (%s)", out.TerminalState, out.Actual.Detail)
+	}
+	if !out.Match {
+		t.Fatalf("expected match=true")
+	}
+}
+
+// EDR command test basis: the rule matches a FIM event from the synthesized
+// footprint (not just the execve) — the rule fires if ANY event matches.
+func TestEDRCommandMatchesFIMEvent(t *testing.T) {
+	out := executeScenario(context.Background(), edrCommandRequest(edrAuditFIMRule, "adduser eve", true), "run-c2", "result-c2")
+	if out.TerminalState != stateBlocked || !out.Actual.Blocked {
+		t.Fatalf("expected FIM /etc/passwd match from adduser footprint, got %s (%s)", out.TerminalState, out.Actual.Detail)
+	}
+}
+
+// EDR command test basis: an unrelated command is not detected.
+func TestEDRCommandNoMatch(t *testing.T) {
+	out := executeScenario(context.Background(), edrCommandRequest(edrAuditExecRule, "ls -la /tmp", true), "run-c3", "result-c3")
+	if out.TerminalState != stateNotBlocked || out.Actual.Blocked || out.Match {
+		t.Fatalf("expected not-detected for benign command, got %s match=%v", out.TerminalState, out.Match)
+	}
+}
+
 // EDR candidate + matching telemetry -> detected/blocked, match agrees with expected.
 func TestEDRExecutionMatchBlocks(t *testing.T) {
 	telemetry := `{"event":{"type":"Process Creation"},"src":{"process":{"cmdline":"powershell.exe -EncodedCommand SQBF"}}}`
