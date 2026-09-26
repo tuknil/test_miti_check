@@ -56,11 +56,11 @@ func runEDRInMemory(ctx context.Context, req SubmitMitigationCheckRequest, out R
 	}
 	out.TestBasis = &test
 
-	// Telemetry source selector. Default (WAZUH_SYNTHETIC unset/false): inject the
-	// activity on a real Wazuh agent and observe the actual alerts it raises.
-	// WAZUH_SYNTHETIC=true uses the synthetic command→telemetry flow below, which
-	// evaluates the candidate rule in-process without an agent.
-	if !getEnvBool("WAZUH_SYNTHETIC", false) {
+	// Telemetry source selector. Default (WAZUH_SYNTHETIC unset/true): the synthetic
+	// command→telemetry flow below, which evaluates the candidate rule in-process
+	// without an agent. WAZUH_SYNTHETIC=false injects the activity on a real Wazuh
+	// agent and observes the actual alerts it raises.
+	if !getEnvBool("WAZUH_SYNTHETIC", true) {
 		return runEDRInjectObserve(ctx, out, cand, test)
 	}
 

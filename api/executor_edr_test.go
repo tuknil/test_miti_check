@@ -36,10 +36,10 @@ func edrCommandRequest(t *testing.T, rule, command string, blocked bool) SubmitM
 		Candidate: cand, TestBasis: tb}
 }
 
-// By default (WAZUH_SYNTHETIC unset/false) EDR uses inject-and-observe, which
-// needs the EDR_* agent configuration; without it the run is could-not-test.
-func TestEDRDefaultUsesInjectObserve(t *testing.T) {
-	t.Setenv("WAZUH_SYNTHETIC", "")
+// WAZUH_SYNTHETIC=false selects inject-and-observe, which needs the EDR_* agent
+// configuration; without it the run is could-not-test.
+func TestEDRInjectObserveWhenDisabled(t *testing.T) {
+	t.Setenv("WAZUH_SYNTHETIC", "false")
 	t.Setenv("EDR_INDEXER_URL", "") // ensure config is absent
 	cand, _ := json.Marshal(CandidateSpec{Kind: "endpoint-detection-rule", Engine: "wazuh", Rule: edrAuditExecRule})
 	blocked := true
